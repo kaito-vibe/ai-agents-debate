@@ -1,0 +1,25 @@
+{
+  "name": "meeting-simulator",
+  "version": "2.0.0",
+  "description": "AI Conversation Simulator — poker table meeting UI",
+  "main": "server.js",
+  "bin": "server.js",
+  "pkg": {
+    "assets": [
+      "index.html"
+    ],
+    "targets": [
+      "node18-win-x64"
+    ],
+    "outputPath": "dist"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "build": "pkg . --compress GZip"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@babel/plugin-transform-react-jsx": "^7.28.6",
+    "pkg": "^5.8.1"
+  }
+}

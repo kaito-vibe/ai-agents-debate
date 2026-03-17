@@ -1,0 +1,1742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Conversation Simulator</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.2/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes fadeInFast { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 15px rgba(16,185,129,0.3); } 50% { box-shadow: 0 0 30px rgba(16,185,129,0.6); } }
+    .anim-fade { animation: fadeIn 0.4s ease-out; }
+    .anim-fade-fast { animation: fadeInFast 0.2s ease-out; }
+    .glow { animation: pulse-glow 2s ease-in-out infinite; }
+    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    body { margin: 0; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }
+    input[type=range] { -webkit-appearance: none; appearance: none; height: 6px; background: #334155; border-radius: 3px; outline: none; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #10b981; cursor: pointer; border: 2px solid #0f172a; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useRef, useEffect } = React;
+
+    // ═══════════════════════════════════════════
+    // CONSTANTS
+    // ═══════════════════════════════════════════
+    const COLORS = [
+      { ring: "#ef4444", initBg: "#ef4444" }, { ring: "#3b82f6", initBg: "#3b82f6" },
+      { ring: "#10b981", initBg: "#10b981" }, { ring: "#f59e0b", initBg: "#f59e0b" },
+      { ring: "#8b5cf6", initBg: "#8b5cf6" }, { ring: "#ec4899", initBg: "#ec4899" },
+      { ring: "#14b8a6", initBg: "#14b8a6" }, { ring: "#f97316", initBg: "#f97316" },
+      { ring: "#6366f1", initBg: "#6366f1" }, { ring: "#84cc16", initBg: "#84cc16" },
+      { ring: "#e11d48", initBg: "#e11d48" }, { ring: "#06b6d4", initBg: "#06b6d4" },
+    ];
+    const TABLE_THEMES = {
+      green:  { felt: ["#065f46","#064e3b","#022c22"], rim: "#78350f", inputBg: "rgba(6,79,59,0.3)",   border: "rgba(6,78,59,0.4)",   label: "Classic Green" },
+      blue:   { felt: ["#1e3a5f","#172d4a","#0f1d32"], rim: "#4a3728", inputBg: "rgba(30,58,95,0.3)",  border: "rgba(23,45,74,0.4)",  label: "Ocean Blue" },
+      red:    { felt: ["#7f1d1d","#611515","#3b0d0d"], rim: "#78350f", inputBg: "rgba(127,29,29,0.3)", border: "rgba(97,21,21,0.4)",  label: "Casino Red" },
+      purple: { felt: ["#4c1d95","#3b1578","#2e1065"], rim: "#44337a", inputBg: "rgba(76,29,149,0.3)", border: "rgba(59,21,120,0.4)", label: "Royal Purple" },
+      black:  { felt: ["#374151","#1f2937","#111827"], rim: "#52525b", inputBg: "rgba(55,65,81,0.3)",  border: "rgba(31,41,55,0.4)",  label: "Midnight" },
+      brown:  { felt: ["#78350f","#633112","#451a03"], rim: "#92400e", inputBg: "rgba(120,53,15,0.3)", border: "rgba(99,49,18,0.4)",  label: "Whiskey" },
+    };
+    const PROVIDERS = {
+      "https://api.openai.com/v1": {
+        label: "OpenAI",
+        models: [
+          { value: "gpt-5-mini", label: "GPT-5 Mini (fast)" },
+          { value: "gpt-5.4", label: "GPT-5.4 (flagship)" },
+          { value: "gpt-5.4-pro", label: "GPT-5.4 Pro" },
+        ], default: "gpt-5-mini",
+      },
+      "https://api.anthropic.com/v1": {
+        label: "Anthropic",
+        models: [
+          { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5 (fast)" },
+          { value: "claude-sonnet-4-6", label: "Sonnet 4.6 (balanced)" },
+          { value: "claude-opus-4-6", label: "Opus 4.6 (flagship)" },
+        ], default: "claude-sonnet-4-6",
+      },
+      "https://generativelanguage.googleapis.com/v1beta": {
+        label: "Google",
+        models: [
+          { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash (fast)" },
+          { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro (flagship)" },
+        ], default: "gemini-2.0-flash",
+      },
+    };
+    const LENGTHS = {
+      mini:   { label: "Mini",   tokens: 60,  prompt: "Reply in 1 very short sentence — stay under 100 characters total. Be extremely concise." },
+      short:  { label: "Short",  tokens: 120, prompt: "Keep your response brief — 1-2 short sentences, under 250 characters total." },
+      medium: { label: "Medium", tokens: 400, prompt: "Respond in about 4-6 sentences, staying under 1000 characters." },
+      long:   { label: "Long",   tokens: 1200, prompt: "Give a thorough, detailed response. Use your natural response length — be as comprehensive as needed." },
+    };
+    const DEFAULT_TEMP = 0.7;
+
+    // ═══════════════════════════════════════════
+    // API HELPERS
+    // ═══════════════════════════════════════════
+    const isAnthropic = (url) => url.includes("api.anthropic.com");
+    const isOpenAI = (url) => url.includes("api.openai.com");
+    const isGoogle = (url) => url.includes("generativelanguage.googleapis.com");
+
+    function buildPayload(baseUrl, model, system, msgs, maxTokens, temperature) {
+      if (isAnthropic(baseUrl)) {
+        // Anthropic Messages API format
+        const payload = { model, system, messages: msgs, max_tokens: maxTokens };
+        if (temperature !== undefined && temperature !== null) payload.temperature = temperature;
+        return payload;
+      }
+      if (isGoogle(baseUrl)) {
+        // Google Gemini format
+        const googleMsgs = msgs.map(m => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content }]
+        }));
+        const payload = {
+          contents: googleMsgs,
+          systemInstruction: { parts: [{ text: system }] },
+          generationConfig: { maxOutputTokens: maxTokens }
+        };
+        if (temperature !== undefined && temperature !== null) payload.generationConfig.temperature = temperature;
+        return payload;
+      }
+      // OpenAI-compatible format
+      const tokenParam = isOpenAI(baseUrl) ? "max_completion_tokens" : "max_tokens";
+      const payload = { model, messages: [{ role: "system", content: system }, ...msgs], [tokenParam]: maxTokens };
+      if (temperature !== undefined && temperature !== null) payload.temperature = temperature;
+      return payload;
+    }
+    function buildHeaders(apiKey, baseUrl) {
+      if (isGoogle(baseUrl)) {
+        return { "Content-Type": "application/json" };
+      }
+      if (isAnthropic(baseUrl)) {
+        return { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" };
+      }
+      return { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey };
+    }
+    function getEndpoint(baseUrl, model, apiKey) {
+      if (isGoogle(baseUrl)) return baseUrl + "/models/" + model + ":generateContent?key=" + apiKey;
+      if (isAnthropic(baseUrl)) return baseUrl + "/messages";
+      return baseUrl + "/chat/completions";
+    }
+    function getStreamEndpoint(baseUrl, model, apiKey) {
+      if (isGoogle(baseUrl)) return baseUrl + "/models/" + model + ":streamGenerateContent?alt=sse&key=" + apiKey;
+      return getEndpoint(baseUrl, model, apiKey);
+    }
+    function extractContent(baseUrl, data) {
+      if (isGoogle(baseUrl)) {
+        if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+        return data.candidates?.[0]?.content?.parts?.map(p => p.text || "").join("") || "";
+      }
+      if (isAnthropic(baseUrl)) {
+        if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+        return (data.content || []).map(b => b.text || "").join("");
+      }
+      if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+      if (!data.choices || !data.choices[0]?.message) throw new Error("Unexpected API response format");
+      return data.choices[0].message.content;
+    }
+
+    async function callAPI(apiKey, baseUrl, model, system, msgs, maxTokens, temperature) {
+      const apiUrl = getEndpoint(baseUrl, model, apiKey);
+      const payload = buildPayload(baseUrl, model, system, msgs, maxTokens, temperature);
+      const apiHeaders = buildHeaders(apiKey, baseUrl);
+      const proxyRes = await fetch("/api/proxy", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: apiUrl, headers: apiHeaders, body: payload }) });
+      if (!proxyRes.ok) throw new Error("Proxy request failed (status " + proxyRes.status + ")");
+      const d = await proxyRes.json(); return extractContent(baseUrl, d);
+    }
+
+    async function callAPIStream(apiKey, baseUrl, model, system, msgs, maxTokens, temperature, onChunk) {
+      const apiUrl = getStreamEndpoint(baseUrl, model, apiKey);
+      const payload = buildPayload(baseUrl, model, system, msgs, maxTokens, temperature);
+      const apiHeaders = buildHeaders(apiKey, baseUrl);
+      const response = await fetch("/api/proxy-stream", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: apiUrl, headers: apiHeaders, body: payload }) });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: { message: "Stream failed" } }));
+        throw new Error(err.error?.message || "Stream request failed");
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = "", buffer = "";
+      const anthropic = isAnthropic(baseUrl);
+      const google = isGoogle(baseUrl);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+        for (const line of lines) {
+          const t = line.trim();
+          if (!t || t === "data: [DONE]") continue;
+          if (t.startsWith("data: ")) {
+            try {
+              const j = JSON.parse(t.slice(6));
+              let delta = "";
+              if (google) {
+                // Google SSE: candidates[0].content.parts[0].text
+                delta = j.candidates?.[0]?.content?.parts?.[0]?.text || "";
+              } else if (anthropic) {
+                // Anthropic SSE: content_block_delta events with delta.text
+                if (j.type === "content_block_delta") delta = j.delta?.text || "";
+              } else {
+                // OpenAI SSE: choices[0].delta.content
+                delta = j.choices?.[0]?.delta?.content || "";
+              }
+              if (delta) { fullText += delta; onChunk(fullText); }
+            } catch (_) {}
+          }
+        }
+      }
+      if (!fullText) throw new Error("No content received");
+      return fullText;
+    }
+
+    // ═══════════════════════════════════════════
+    // ICONS (inline SVG)
+    // ═══════════════════════════════════════════
+    const Ico = ({ children, size = 16, className = "", ...rest }) => (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...rest}>{children}</svg>
+    );
+    const IcoSettings = (p) => <Ico {...p}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></Ico>;
+    const IcoSend = (p) => <Ico {...p}><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></Ico>;
+    const IcoFile = (p) => <Ico {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></Ico>;
+    const IcoSparkles = (p) => <Ico {...p}><path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z"/></Ico>;
+    const IcoX = (p) => <Ico {...p}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></Ico>;
+    const IcoPlus = (p) => <Ico {...p}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></Ico>;
+    const IcoRotate = (p) => <Ico {...p}><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></Ico>;
+    const IcoUsers = (p) => <Ico {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></Ico>;
+    const IcoTrash = (p) => <Ico {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></Ico>;
+    const IcoCopy = (p) => <Ico {...p}><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></Ico>;
+    const IcoCheck = (p) => <Ico {...p}><polyline points="20 6 9 17 4 12"/></Ico>;
+    const IcoSave = (p) => <Ico {...p}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></Ico>;
+    const IcoFolder = (p) => <Ico {...p}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></Ico>;
+    const IcoPlay = (p) => <Ico {...p}><polygon points="5 3 19 12 5 21 5 3"/></Ico>;
+    const IcoArrow = (p) => <Ico {...p}><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></Ico>;
+    const IcoMsg = (p) => <Ico {...p}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></Ico>;
+    const IcoUser = (p) => <Ico {...p}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></Ico>;
+    const IcoBook = (p) => <Ico {...p}><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></Ico>;
+    const IcoDownload = (p) => <Ico {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></Ico>;
+    const IcoSearch = (p) => <Ico {...p}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></Ico>;
+    const IcoUndo = (p) => <Ico {...p}><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></Ico>;
+    const IcoEdit = (p) => <Ico {...p}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></Ico>;
+
+    // ═══════════════════════════════════════════
+    // MAIN APP
+    // ═══════════════════════════════════════════
+    function App() {
+      const [page, setPage] = useState("home");
+      // Settings (persisted)
+      const [apiKeys, setApiKeys] = useState({
+        "https://api.openai.com/v1": "",
+        "https://api.anthropic.com/v1": "",
+        "https://generativelanguage.googleapis.com/v1beta": "",
+      });
+      const [defaultProvider, setDefaultProvider] = useState("https://api.anthropic.com/v1");
+      const [defaultModel, setDefaultModel] = useState("claude-sonnet-4-6");
+      const [answerLength, setAnswerLength] = useState("medium");
+      const [autoUpdateContext, setAutoUpdateContext] = useState(false);
+      // Personas library
+      const [personas, setPersonas] = useState([]);
+      const [editingPersona, setEditingPersona] = useState(null);
+      const [editPersonaForm, setEditPersonaForm] = useState({ name: "", title: "", instructions: "", temperature: DEFAULT_TEMP });
+      // Conversations list
+      const [conversations, setConversations] = useState([]);
+      const [convSearch, setConvSearch] = useState("");
+      const [confirmDeleteFile, setConfirmDeleteFile] = useState(null);
+      // Current meeting state
+      const [seats, setSeats] = useState(Array(6).fill(null));
+      const [messages, setMessages] = useState([]);
+      const [topic, setTopic] = useState("");
+      const [tableTheme, setTableTheme] = useState("brown");
+      const [currentSaveName, setCurrentSaveName] = useState("");
+      const [agenda, setAgenda] = useState([]);
+      const [activeAgendaIdx, setActiveAgendaIdx] = useState(-1);
+      const [agendaInput, setAgendaInput] = useState("");
+      const [context, setContext] = useState("");
+      const [showContext, setShowContext] = useState(false);
+      const [updatingContext, setUpdatingContext] = useState(false);
+      // Debate mode state
+      const [simMode, setSimMode] = useState("meeting"); // "meeting" or "debate"
+      const [debateFormat, setDebateFormat] = useState("sides"); // "sides" or "freeform"
+      const [debateSide, setDebateSide] = useState({}); // {seatIndex: "for"/"against"}
+      const [debateScore, setDebateScore] = useState(50); // 0-100, 50=neutral
+      const [debateScoreHistory, setDebateScoreHistory] = useState([]);
+      const [debateRound, setDebateRound] = useState(0);
+      const [debateTotalRounds, setDebateTotalRounds] = useState(3);
+      const [debateRunning, setDebateRunning] = useState(false);
+      const [debateFinished, setDebateFinished] = useState(false);
+      const [debateSummary, setDebateSummary] = useState("");
+      const [debateStats, setDebateStats] = useState({});
+      // UI
+      const [loading, setLoading] = useState(false);
+      const [loadingSeat, setLoadingSeat] = useState(null);
+      const [error, setError] = useState("");
+      const [settingsLoaded, setSettingsLoaded] = useState(false);
+      const [userInput, setUserInput] = useState("");
+      const [showMinutes, setShowMinutes] = useState(false);
+      const [minutesText, setMinutesText] = useState("");
+      const [copied, setCopied] = useState(false);
+      const [editingSeat, setEditingSeat] = useState(null);
+      const [editForm, setEditForm] = useState({ name: "", title: "", instructions: "", temperature: DEFAULT_TEMP, provider: "", model: "" });
+      const [modalError, setModalError] = useState("");
+      const [genInstr, setGenInstr] = useState(false);
+      const [showSaveModal, setShowSaveModal] = useState(false);
+      const [saveName, setSaveName] = useState("");
+      const [showPersonaPicker, setShowPersonaPicker] = useState(false);
+      const [showExportMenu, setShowExportMenu] = useState(false);
+      const [speakPicker, setSpeakPicker] = useState(null); // seat index or null
+      const [showRecovery, setShowRecovery] = useState(false);
+      const [recoveryData, setRecoveryData] = useState(null);
+      const msgsRef = useRef([]);
+      const autosaveTimer = useRef(null);
+      const chatRef = useRef(null);
+      const undoStack = useRef([]);
+      const [canUndo, setCanUndo] = useState(false);
+
+      useEffect(() => { msgsRef.current = messages; }, [messages]);
+      useEffect(() => { if (chatRef.current) chatRef.current.scrollTo({ top: chatRef.current.scrollHeight, behavior: "smooth" }); }, [messages]);
+
+      // ── Load settings + personas + autosave on startup ──
+      useEffect(() => {
+        (async () => {
+          try {
+            const [sRes, pRes, aRes] = await Promise.all([fetch("/api/settings"), fetch("/api/personas"), fetch("/api/autosave")]);
+            if (sRes.ok) {
+              const s = await sRes.json();
+              // Load new apiKeys structure
+              if (s.apiKeys) setApiKeys(k => ({...k, ...s.apiKeys}));
+              // Migration: if old single apiKey exists, put it in the right slot
+              if (s.apiKey && s.baseUrl) setApiKeys(k => ({...k, [s.baseUrl]: s.apiKey}));
+              if (s.defaultProvider && PROVIDERS[s.defaultProvider]) setDefaultProvider(s.defaultProvider);
+              else if (s.baseUrl && PROVIDERS[s.baseUrl]) setDefaultProvider(s.baseUrl);
+              if (s.defaultModel) setDefaultModel(s.defaultModel);
+              else if (s.model) setDefaultModel(s.model);
+              if (s.answerLength) setAnswerLength(s.answerLength);
+              if (s.autoUpdateContext !== undefined) setAutoUpdateContext(s.autoUpdateContext);
+            }
+            if (pRes.ok) setPersonas(await pRes.json());
+            if (aRes.ok) {
+              const a = await aRes.json();
+              if (a.state && (a.state.messages?.length > 0 || a.state.seats?.some(Boolean))) {
+                setRecoveryData(a); setShowRecovery(true);
+              }
+            }
+          } catch (_) {}
+          setSettingsLoaded(true);
+        })();
+      }, []);
+
+      // ── Persist settings ──
+      useEffect(() => {
+        if (!settingsLoaded) return;
+        fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ apiKeys, defaultProvider, defaultModel, answerLength, autoUpdateContext }) }).catch(() => {});
+      }, [apiKeys, defaultProvider, defaultModel, answerLength, autoUpdateContext, settingsLoaded]);
+
+      // ── Persona CRUD ──
+      const refreshPersonas = async () => { try { const r = await fetch("/api/personas"); if (r.ok) setPersonas(await r.json()); } catch (_) {} };
+      const savePersona = async (p) => {
+        await fetch("/api/personas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
+        refreshPersonas();
+      };
+      const deletePersona = async (id) => {
+        await fetch("/api/personas/" + encodeURIComponent(id), { method: "DELETE" });
+        refreshPersonas();
+      };
+      const updatePersonaFromForm = async () => {
+        if (!editPersonaForm.name.trim()) return;
+        await savePersona({ id: editingPersona, name: editPersonaForm.name.trim(), title: editPersonaForm.title.trim(), instructions: editPersonaForm.instructions.trim(), temperature: editPersonaForm.temperature });
+        setEditingPersona(null);
+      };
+
+      // ── Conversation CRUD ──
+      const refreshConversations = async () => { try { const r = await fetch("/api/saves"); if (r.ok) setConversations(await r.json()); } catch (_) {} };
+      const loadState = (s) => {
+        if (s.seats) {
+          // Ensure debate mode has 12 seats
+          if (s.simMode === "debate" && s.seats.length < 12) {
+            const expanded = [...s.seats, ...Array(12 - s.seats.length).fill(null)];
+            setSeats(expanded);
+          } else { setSeats(s.seats); }
+        }
+        if (s.messages) { setMessages(s.messages); msgsRef.current = s.messages; }
+        if (s.topic !== undefined) setTopic(s.topic);
+        if (s.tableTheme) setTableTheme(s.tableTheme);
+        if (s.agenda) setAgenda(s.agenda);
+        if (s.activeAgendaIdx !== undefined) setActiveAgendaIdx(s.activeAgendaIdx);
+        if (s.context !== undefined) setContext(s.context);
+        if (s.simMode) setSimMode(s.simMode);
+        if (s.debateFormat) setDebateFormat(s.debateFormat);
+        if (s.debateSide) setDebateSide(s.debateSide);
+        if (s.debateScore !== undefined) setDebateScore(s.debateScore);
+        if (s.debateScoreHistory) setDebateScoreHistory(s.debateScoreHistory);
+        if (s.debateRound !== undefined) setDebateRound(s.debateRound);
+        if (s.debateTotalRounds !== undefined) setDebateTotalRounds(s.debateTotalRounds);
+        undoStack.current = []; setCanUndo(false);
+      };
+      const loadConversation = async (filename) => {
+        try {
+          const r = await fetch("/api/saves/" + encodeURIComponent(filename));
+          if (r.ok) { const d = await r.json(); loadState(d.state); setCurrentSaveName(d.name || ""); setShowExportMenu(false); setPage(d.state.simMode === "debate" ? "debate" : "meeting"); }
+        } catch (e) { setError("Load failed: " + e.message); }
+      };
+      const saveConversation = async (name) => {
+        const state = { seats, messages: msgsRef.current, topic, tableTheme, agenda, activeAgendaIdx, context, simMode, debateFormat, debateSide, debateScore, debateScoreHistory, debateRound, debateTotalRounds };
+        await fetch("/api/saves", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, state }) });
+        setCurrentSaveName(name); refreshConversations();
+      };
+      const deleteConversation = async (filename) => {
+        await fetch("/api/saves/" + encodeURIComponent(filename), { method: "DELETE" });
+        setConfirmDeleteFile(null); refreshConversations();
+      };
+
+      // ── Autosave ──
+      const triggerAutosave = () => {
+        if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+        autosaveTimer.current = setTimeout(async () => {
+          try {
+            const autosaveState = { seats, messages: msgsRef.current, topic, tableTheme, agenda, activeAgendaIdx, context, simMode, debateFormat, debateSide, debateScore, debateScoreHistory, debateRound, debateTotalRounds };
+            await fetch("/api/autosave", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(autosaveState) });
+          } catch (_) {}
+        }, 3000);
+      };
+      useEffect(() => { if ((page === "meeting" || page === "debate") && settingsLoaded) triggerAutosave(); }, [seats, messages, topic, tableTheme, agenda, activeAgendaIdx, context, simMode, debateScore, debateRound]);
+
+      const recoverAutosave = () => { if (!recoveryData?.state) return; loadState(recoveryData.state); setShowRecovery(false); setPage(recoveryData.state.simMode === "debate" ? "debate" : "meeting"); };
+
+      // ── New meeting ──
+      const startNew = () => {
+        setSeats(Array(6).fill(null)); setMessages([]); msgsRef.current = [];
+        setTopic(""); setTableTheme("brown"); setCurrentSaveName(""); setError("");
+        setAgenda([]); setActiveAgendaIdx(-1); setAgendaInput("");
+        setContext(""); setShowContext(false); undoStack.current = []; setCanUndo(false);
+        setShowExportMenu(false); setSimMode("meeting"); setDebateFinished(false); setDebateRound(0);
+        setPage("meeting");
+      };
+
+      // ── New debate ──
+      const startNewDebate = () => {
+        setSeats(Array(12).fill(null)); setMessages([]); msgsRef.current = [];
+        setTopic(""); setTableTheme("brown"); setCurrentSaveName(""); setError("");
+        setAgenda([]); setActiveAgendaIdx(-1); setAgendaInput("");
+        setContext(""); setShowContext(false); undoStack.current = []; setCanUndo(false);
+        setShowExportMenu(false); setSimMode("debate"); setDebateFinished(false); setDebateRound(0);
+        setDebateScore(50); setDebateScoreHistory([]); setDebateSummary(""); setDebateTotalRounds(5);
+        setPage("debate-setup");
+      };
+
+
+      // ═══════════════════════════════════════════
+      // SHARED FUNCTIONS
+      // ═══════════════════════════════════════════
+      const occupied = seats.map((s, i) => (s ? { ...s, idx: i } : null)).filter(Boolean);
+      const th = TABLE_THEMES[tableTheme];
+      const currentAgendaItem = activeAgendaIdx >= 0 && agenda[activeAgendaIdx] ? agenda[activeAgendaIdx].text : null;
+
+      const switchAgendaItem = (idx) => {
+        setActiveAgendaIdx(idx);
+        const item = agenda[idx];
+        if (item) addMessage({ seatIndex: -2, name: "System", text: "Agenda topic switched to: " + item.text, isSystem: true, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
+      };
+      const addAgendaItem = () => { if (!agendaInput.trim()) return; setAgenda(a => [...a, { text: agendaInput.trim(), done: false }]); setAgendaInput(""); };
+      const removeAgendaItem = (idx) => { setAgenda(a => a.filter((_, i) => i !== idx)); if (activeAgendaIdx === idx) setActiveAgendaIdx(-1); else if (activeAgendaIdx > idx) setActiveAgendaIdx(activeAgendaIdx - 1); };
+
+      // Get per-agent or default API configuration
+      const getAgentConfig = (seat) => {
+        const provider = seat?.provider || defaultProvider;
+        const model = seat?.model || defaultModel;
+        const key = apiKeys[provider] || "";
+        return { apiKey: key, baseUrl: provider, model };
+      };
+
+      // AI context update
+      const updateContextAI = async () => {
+        const cfg = getAgentConfig(null);
+        if (!cfg.apiKey) { setError("Set API key first"); return; }
+        if (msgsRef.current.length === 0) { setError("No conversation to summarize yet"); return; }
+        setUpdatingContext(true);
+        try {
+          const transcript = msgsRef.current.filter(m => !m.isSystem).map(m => "[" + m.name + "]: " + m.text).join("\n\n");
+          const parts = occupied.map(s => s.name + " (" + s.title + ")").join(", ");
+          const text = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model,
+            "You are a meeting analyst. Update the meeting context document based on the discussion so far. Be concise and structured. Include: key points raised, areas of agreement/disagreement, open questions, and emerging decisions. Keep it under 200 words.",
+            [{ role: "user", content: "Meeting topic: " + topic + (context ? "\n\nPrevious context:\n" + context : "") + "\n\nParticipants: " + parts + "\n\nDiscussion transcript:\n" + transcript + "\n\nGenerate an updated context document." }], 400);
+          setContext(text); setShowContext(true);
+        } catch (e) { setError("Context update error: " + e.message); }
+        setUpdatingContext(false);
+      };
+
+      const sysPrompt = (seat, idx, lengthKey) => {
+        const len = lengthKey || answerLength;
+        const others = occupied.filter(s => s.idx !== idx).map(s => s.name + " (" + s.title + ")").join(", ");
+        const topicLine = currentAgendaItem ? "Current agenda item: \"" + currentAgendaItem + "\" (Overall topic: \"" + topic + "\")" : "Meeting topic: \"" + topic + "\"";
+        const agendaLine = agenda.length > 0 ? "\nFull agenda: " + agenda.map((a, i) => (i === activeAgendaIdx ? "[CURRENT] " : "") + (i+1) + ". " + a.text).join(", ") : "";
+        const contextLine = context ? "\n\nMeeting context/brief:\n" + context : "";
+        return "You are " + seat.name + ", " + seat.title + ".\n\n" + seat.instructions + "\n\n" + topicLine + agendaLine + contextLine + "\nOther participants: " + (others || "None") + "\n\n" + LENGTHS[len].prompt + "\n\nStay in character. Be specific and constructive. Focus on the current agenda item if one is active. Reference what others said when relevant. Do NOT prefix your response with your name or role.";
+      };
+      const convMsgs = () => {
+        const m = msgsRef.current;
+        if (m.length === 0) return [{ role: "user", content: "The meeting is starting. Topic: \"" + topic + "\". Share your opening thoughts." }];
+        return [{ role: "user", content: "Conversation so far:\n\n" + m.map(x => "[" + x.name + "]: " + x.text).join("\n\n") + "\n\nShare your thoughts on what has been discussed." }];
+      };
+
+      // Message management with undo
+      const addMessage = (msg) => {
+        undoStack.current.push([...msgsRef.current]);
+        if (undoStack.current.length > 30) undoStack.current.shift();
+        setCanUndo(true);
+        const u = [...msgsRef.current, msg];
+        msgsRef.current = u; setMessages(u);
+      };
+      const updateLastMessage = (text) => {
+        const updated = [...msgsRef.current];
+        updated[updated.length - 1] = { ...updated[updated.length - 1], text };
+        msgsRef.current = updated; setMessages([...updated]);
+      };
+      const undoMessage = () => {
+        if (undoStack.current.length === 0) return;
+        const prev = undoStack.current.pop();
+        msgsRef.current = prev; setMessages([...prev]);
+        setCanUndo(undoStack.current.length > 0);
+      };
+
+      // Speak with streaming
+      const speak = async (si, lengthKey) => {
+        const len = lengthKey || answerLength;
+        const seat = seats[si];
+        if (!seat || !topic) { setError(!topic ? "Set a meeting topic" : ""); return; }
+        const cfg = getAgentConfig(seat);
+        if (!cfg.apiKey) { setError("Set API key for " + (PROVIDERS[cfg.baseUrl]?.label || "provider") + " in Settings"); return; }
+        setError(""); setLoading(true); setLoadingSeat(si); setSpeakPicker(null);
+        const sys = sysPrompt(seat, si, len);
+        const conv = convMsgs();
+        const temp = seat.temperature !== undefined ? seat.temperature : DEFAULT_TEMP;
+        const msg = { seatIndex: si, name: seat.name, text: "", isUser: false, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
+        addMessage(msg);
+        try {
+          await callAPIStream(cfg.apiKey, cfg.baseUrl, cfg.model, sys, conv, LENGTHS[len].tokens, temp, updateLastMessage);
+        } catch (e) {
+          try {
+            const text = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model, sys, conv, LENGTHS[len].tokens, temp);
+            updateLastMessage(text);
+          } catch (e2) { undoMessage(); setError("API Error: " + e2.message); }
+        }
+        setLoading(false); setLoadingSeat(null);
+      };
+
+      const sendUser = () => {
+        if (!userInput.trim()) return;
+        addMessage({ seatIndex: -1, name: "You", text: userInput.trim(), isUser: true, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
+        setUserInput("");
+      };
+
+      const feedbackRound = async () => {
+        if (!topic) { setError("Set a topic"); return; }
+        if (occupied.length === 0) { setError("Add participants first"); return; }
+        setError(""); setLoading(true);
+        for (const s of occupied) {
+          setLoadingSeat(s.idx);
+          const cfg = getAgentConfig(seats[s.idx]);
+          if (!cfg.apiKey) { setError("Set API key for " + (PROVIDERS[cfg.baseUrl]?.label || "provider") + " in Settings"); setLoading(false); setLoadingSeat(null); return; }
+          const sys = sysPrompt(seats[s.idx], s.idx);
+          const conv = convMsgs();
+          const temp = seats[s.idx].temperature !== undefined ? seats[s.idx].temperature : DEFAULT_TEMP;
+          const msg = { seatIndex: s.idx, name: s.name, text: "", isUser: false, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
+          addMessage(msg);
+          try {
+            await callAPIStream(cfg.apiKey, cfg.baseUrl, cfg.model, sys, conv, LENGTHS[answerLength].tokens, temp, updateLastMessage);
+          } catch (e) {
+            try {
+              const text = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model, sys, conv, LENGTHS[answerLength].tokens, temp);
+              updateLastMessage(text);
+            } catch (e2) { undoMessage(); setError("Error (" + s.name + "): " + e2.message); break; }
+          }
+        }
+        setLoading(false); setLoadingSeat(null);
+        if (autoUpdateContext && msgsRef.current.filter(m => !m.isSystem).length > 0) await updateContextAI();
+      };
+
+      const genMinutes = async () => {
+        if (!messages.length) { setError("No conversation yet"); return; }
+        const cfg = getAgentConfig(null);
+        if (!cfg.apiKey) { setError("Set API key first"); return; }
+        setLoading(true); setError("");
+        try {
+          const transcript = messages.map(m => "[" + m.name + "]: " + m.text).join("\n\n");
+          const parts = occupied.map(s => s.name + " (" + s.title + ")").join(", ");
+          const text = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model,
+            "You are a professional meeting secretary. Generate clear, well-structured meeting minutes.",
+            [{ role: "user", content: "Generate meeting minutes:\n\nTopic: " + topic + "\nParticipants: " + parts + (messages.some(m => m.isUser) ? ", You (Moderator)" : "") + "\n\nTranscript:\n" + transcript + "\n\nInclude: Summary, Key Discussion Points, Decisions Made, Action Items, Next Steps." }], 1200);
+          setMinutesText(text); setShowMinutes(true);
+        } catch (e) { setError("Error: " + e.message); }
+        setLoading(false);
+      };
+
+      // Export
+      const exportConversation = (format) => {
+        setShowExportMenu(false);
+        if (format === "md") {
+          let md = "# " + (topic || "Meeting") + "\n\n";
+          md += "**Participants:** " + occupied.map(s => s.name + " (" + s.title + ")").join(", ") + (messages.some(m => m.isUser) ? ", You (Moderator)" : "") + "\n\n";
+          if (agenda.length) md += "**Agenda:** " + agenda.map((a, i) => (i+1) + ". " + a.text).join(", ") + "\n\n";
+          if (context) md += "## Context\n\n" + context + "\n\n";
+          md += "## Transcript\n\n";
+          messages.forEach(m => {
+            if (m.isSystem) md += "---\n\n*" + m.text + "*\n\n---\n\n";
+            else md += "**" + m.name + "** (" + m.time + "):\n\n" + m.text + "\n\n";
+          });
+          const blob = new Blob([md], { type: "text/markdown" });
+          const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = (topic || "meeting").replace(/[^a-zA-Z0-9 ]/g, "").slice(0, 40).trim() + ".md"; a.click();
+        } else {
+          const data = { topic, participants: occupied.map(s => ({ name: s.name, title: s.title, temperature: s.temperature })), agenda, context, messages, exportedAt: new Date().toISOString() };
+          const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+          const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = (topic || "meeting").replace(/[^a-zA-Z0-9 ]/g, "").slice(0, 40).trim() + ".json"; a.click();
+        }
+      };
+
+      const aiAssist = async () => {
+        setModalError("");
+        const cfg = getAgentConfig(null);
+        if (!cfg.apiKey) { setModalError("Set your API key in Settings first"); return; }
+        const ctx = [editForm.name, editForm.title, editForm.instructions].filter(Boolean).join(", ");
+        if (!ctx.trim()) { setModalError("Enter at least a name, title, or description"); return; }
+        setGenInstr(true);
+        try {
+          const info = (editForm.name ? "Name: " + editForm.name : "") + (editForm.title ? "\nTitle: " + editForm.title : "") + (editForm.instructions ? "\nContext: " + editForm.instructions : "");
+          const text = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model,
+            "Generate a concise persona description (2-3 sentences) for a meeting participant. Describe their communication style, priorities, and typical stance. Be opinionated and specific.",
+            [{ role: "user", content: "Generate meeting persona instructions:\n" + info }], 200);
+          setEditForm(f => ({ ...f, instructions: text }));
+        } catch (e) { setModalError("API Error: " + e.message); }
+        setGenInstr(false);
+      };
+
+      const saveSeat = async () => {
+        if (!editForm.name.trim()) return;
+        const u = [...seats];
+        u[editingSeat] = { name: editForm.name.trim(), title: editForm.title.trim(), instructions: editForm.instructions.trim(), temperature: editForm.temperature, provider: editForm.provider, model: editForm.model };
+        setSeats(u); setEditingSeat(null);
+        // Only save persona fields (not provider/model) to the persona library
+        await savePersona({ name: editForm.name.trim(), title: editForm.title.trim(), instructions: editForm.instructions.trim(), temperature: editForm.temperature });
+      };
+      const removeSeat = (i) => { const u = [...seats]; u[i] = null; setSeats(u); setEditingSeat(null); };
+      const openEdit = (i) => {
+        if (loading) return;
+        const s = seats[i];
+        setEditForm(s ? { name: s.name, title: s.title, instructions: s.instructions, temperature: s.temperature !== undefined ? s.temperature : DEFAULT_TEMP, provider: s.provider || "", model: s.model || "" }
+          : { name: "", title: "", instructions: "", temperature: DEFAULT_TEMP, provider: "", model: "" });
+        setModalError(""); setShowPersonaPicker(false); setEditingSeat(i);
+      };
+      const pickPersona = (p) => {
+        // Pick persona but don't set provider/model (those are seat-specific)
+        setEditForm(f => ({ ...f, name: p.name, title: p.title, instructions: p.instructions, temperature: p.temperature !== undefined ? p.temperature : DEFAULT_TEMP }));
+        setShowPersonaPicker(false);
+      };
+
+      const LENGTH_KEYS = Object.keys(LENGTHS);
+      const LENGTH_COLORS = { mini: "#6b7280", short: "#3b82f6", medium: "#10b981", long: "#f59e0b" };
+
+
+      // ═══════════════════════════════════════════
+      // HOME PAGE
+      // ═══════════════════════════════════════════
+      if (page === "home") {
+        return (
+          <div className="h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 text-slate-100 anim-fade">
+            <div className="text-center mb-12">
+              <div className="flex items-center justify-center gap-3 mb-3"><IcoMsg size={40} className="text-emerald-400" /></div>
+              <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">AI Conversation Simulator</h1>
+              <p className="text-slate-500 text-sm">Configure personas, simulate meetings, generate insights</p>
+            </div>
+            {showRecovery && recoveryData && (
+              <div className="mb-6 w-80 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25 anim-fade">
+                <div className="flex items-center gap-2 mb-2"><IcoRotate size={15} className="text-amber-400" /><span className="text-sm font-semibold text-amber-300">Unsaved session found</span></div>
+                <div className="text-xs text-slate-400 mb-3">
+                  {recoveryData.state.topic && <span>Topic: {recoveryData.state.topic} · </span>}
+                  {(recoveryData.state.messages || []).length} messages · {new Date(recoveryData.savedAt).toLocaleString()}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={recoverAutosave} className="flex-1 px-3 py-2 rounded-xl bg-amber-600/80 hover:bg-amber-500 text-xs font-semibold transition-colors">Resume</button>
+                  <button onClick={() => setShowRecovery(false)} className="px-3 py-2 rounded-xl bg-slate-700/60 hover:bg-slate-700 text-xs text-slate-400 transition-colors">Dismiss</button>
+                </div>
+              </div>
+            )}
+            <div className="flex flex-col gap-3 w-72">
+              <button onClick={startNew} className="flex items-center gap-3 px-6 py-4 rounded-2xl bg-emerald-600/90 hover:bg-emerald-500 transition-all text-left group glow">
+                <IcoPlay size={22} className="group-hover:scale-110 transition-transform" />
+                <div><div className="font-semibold">New Simulation</div><div className="text-xs text-emerald-200/60">Start a fresh conversation</div></div>
+              </button>
+              <button onClick={startNewDebate} className="flex items-center gap-3 px-6 py-4 rounded-2xl bg-amber-600/90 hover:bg-amber-500 transition-all text-left group">
+                <IcoSparkles size={22} className="group-hover:scale-110 transition-transform" />
+                <div><div className="font-semibold">New Debate</div><div className="text-xs text-amber-200/60">Run a debate battle</div></div>
+              </button>
+              <button onClick={() => { refreshConversations(); setPage("conversations"); }} className="flex items-center gap-3 px-6 py-4 rounded-2xl bg-slate-700/60 hover:bg-slate-700 transition-all text-left group">
+                <IcoFolder size={22} className="text-blue-400 group-hover:scale-110 transition-transform" />
+                <div><div className="font-semibold">Load Simulation</div><div className="text-xs text-slate-400">Continue a saved meeting</div></div>
+              </button>
+              <button onClick={() => { refreshPersonas(); setPage("settings"); }} className="flex items-center gap-3 px-6 py-4 rounded-2xl bg-slate-700/60 hover:bg-slate-700 transition-all text-left group">
+                <IcoSettings size={22} className="text-amber-400 group-hover:scale-110 transition-transform" />
+                <div><div className="font-semibold">Settings</div><div className="text-xs text-slate-400">API keys, models, personas</div></div>
+              </button>
+              <button onClick={() => window.close()} className="flex items-center gap-3 px-6 py-4 rounded-2xl bg-slate-800/40 hover:bg-slate-800 transition-all text-left text-slate-500 group">
+                <IcoX size={22} className="group-hover:scale-110 transition-transform" /><div><div className="font-semibold">Exit</div></div>
+              </button>
+            </div>
+            <div className="mt-8 text-[10px] text-slate-700">v2.0 — Your API key stays local</div>
+          </div>
+        );
+      }
+
+      // ═══════════════════════════════════════════
+      // SETTINGS PAGE (with persona editing)
+      // ═══════════════════════════════════════════
+      if (page === "settings") {
+        return (
+          <div className="h-screen flex flex-col bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100 anim-fade">
+            <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-700/40">
+              <button onClick={() => setPage("home")} className="p-2 rounded-lg hover:bg-slate-700/60 transition-colors"><IcoArrow size={18} /></button>
+              <h2 className="text-lg font-bold">Settings</h2>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 max-w-xl mx-auto w-full space-y-6">
+              <div>
+                <h3 className="text-sm font-semibold mb-3 text-slate-300">API Configuration</h3>
+                <div className="space-y-3">
+                  {Object.entries(PROVIDERS).map(([url, p]) => (
+                    <div key={url}><label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">{p.label} API Key</label>
+                      <input type="password" value={apiKeys[url] || ""} onChange={e => setApiKeys(k => ({...k, [url]: e.target.value}))} placeholder={p.label === "OpenAI" ? "sk-..." : p.label === "Anthropic" ? "sk-ant-..." : "AI..."} className="w-full bg-slate-700/50 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-1 focus:ring-emerald-500/40" /></div>
+                  ))}
+                  <div><label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Default Provider</label>
+                    <select value={defaultProvider} onChange={e => { setDefaultProvider(e.target.value); setDefaultModel(PROVIDERS[e.target.value]?.default || ""); }} className="w-full bg-slate-700/50 rounded-lg px-3 py-2.5 text-sm outline-none cursor-pointer">
+                      {Object.entries(PROVIDERS).map(([u, p]) => <option key={u} value={u}>{p.label}</option>)}
+                    </select></div>
+                  <div><label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Default Model</label>
+                    <select value={PROVIDERS[defaultProvider]?.models.some(m => m.value === defaultModel) ? defaultModel : "__custom"} onChange={e => { if (e.target.value !== "__custom") setDefaultModel(e.target.value); }} className="w-full bg-slate-700/50 rounded-lg px-3 py-2.5 text-sm outline-none cursor-pointer">
+                      {(PROVIDERS[defaultProvider]?.models || []).map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                      <option value="__custom">Custom...</option>
+                    </select>
+                    {!(PROVIDERS[defaultProvider]?.models.some(m => m.value === defaultModel)) && (
+                      <input type="text" value={defaultModel} onChange={e => setDefaultModel(e.target.value)} placeholder="Model name..." className="w-full bg-slate-700/50 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-1 focus:ring-emerald-500/40 mt-2" />
+                    )}</div>
+                  <div><label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Default Answer Length</label>
+                    <select value={answerLength} onChange={e => setAnswerLength(e.target.value)} className="w-full bg-slate-700/50 rounded-lg px-3 py-2.5 text-sm outline-none cursor-pointer">
+                      {Object.entries(LENGTHS).map(([k, v]) => <option key={k} value={k}>{v.label} — {v.prompt}</option>)}
+                    </select></div>
+                  <div className="flex items-center gap-3">
+                    <label className="text-[10px] text-slate-500 uppercase tracking-wider">Auto-update context after rounds</label>
+                    <button onClick={() => setAutoUpdateContext(!autoUpdateContext)}
+                      className={"w-10 h-5 rounded-full transition-colors relative " + (autoUpdateContext ? "bg-emerald-600" : "bg-slate-600")}>
+                      <div className={"w-4 h-4 rounded-full bg-white absolute top-0.5 transition-all " + (autoUpdateContext ? "left-5.5" : "left-0.5")} style={{ left: autoUpdateContext ? 22 : 2 }} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-slate-300">Personas Library ({personas.length})</h3>
+                </div>
+                {personas.length === 0 ? (
+                  <div className="text-center text-slate-600 py-6 text-sm">Personas you create in meetings will appear here for reuse</div>
+                ) : (
+                  <div className="space-y-2">
+                    {personas.map(p => (
+                      <div key={p.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/60 group">
+                        <div className="w-9 h-9 rounded-full bg-emerald-600/30 flex items-center justify-center text-emerald-400 text-xs font-bold flex-shrink-0">
+                          {p.name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setEditPersonaForm({ name: p.name, title: p.title, instructions: p.instructions, temperature: p.temperature || DEFAULT_TEMP }); setEditingPersona(p.id); }}>
+                          <div className="text-sm font-semibold truncate">{p.name}</div>
+                          <div className="text-[11px] text-slate-500 truncate">{p.title}</div>
+                        </div>
+                        <button onClick={() => { setEditPersonaForm({ name: p.name, title: p.title, instructions: p.instructions, temperature: p.temperature || DEFAULT_TEMP }); setEditingPersona(p.id); }}
+                          className="p-1.5 rounded-lg text-slate-600 hover:text-blue-400 hover:bg-blue-500/10 opacity-0 group-hover:opacity-100 transition-all"><IcoEdit size={14} /></button>
+                        <button onClick={() => deletePersona(p.id)}
+                          className="p-1.5 rounded-lg text-slate-600 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"><IcoTrash size={14} /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="text-xs text-slate-600">Settings auto-save. Your API key is stored locally on your machine only.</div>
+            </div>
+
+            {/* Persona Edit Modal */}
+            {editingPersona !== null && (
+              <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 anim-fade-fast" onClick={() => setEditingPersona(null)}>
+                <div className="bg-slate-800 rounded-2xl p-5 w-full max-w-md mx-4 shadow-2xl border border-slate-700/50" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-bold flex items-center gap-2"><IcoEdit size={16} className="text-blue-400" /> Edit Persona</h3>
+                    <button onClick={() => setEditingPersona(null)} className="text-slate-400 hover:text-white"><IcoX size={18} /></button>
+                  </div>
+                  <div className="space-y-3">
+                    <div><label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Name</label>
+                      <input type="text" value={editPersonaForm.name} onChange={e => setEditPersonaForm(f => ({...f, name: e.target.value}))} className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-emerald-500/30" /></div>
+                    <div><label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Title / Role</label>
+                      <input type="text" value={editPersonaForm.title} onChange={e => setEditPersonaForm(f => ({...f, title: e.target.value}))} className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-emerald-500/30" /></div>
+                    <div><label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Instructions</label>
+                      <textarea value={editPersonaForm.instructions} onChange={e => setEditPersonaForm(f => ({...f, instructions: e.target.value}))} rows={4} className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none resize-none focus:ring-1 focus:ring-emerald-500/30" /></div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[10px] text-slate-500 uppercase tracking-wider">Temperature</label>
+                        <span className="text-[11px] text-slate-400 font-mono">{editPersonaForm.temperature.toFixed(1)}</span>
+                      </div>
+                      <input type="range" min="0" max="2" step="0.1" value={editPersonaForm.temperature} onChange={e => setEditPersonaForm(f => ({...f, temperature: parseFloat(e.target.value)}))} className="w-full" />
+                      <div className="flex justify-between text-[9px] text-slate-600 mt-0.5"><span>Focused</span><span>Balanced</span><span>Creative</span></div>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-4 justify-end">
+                    <button onClick={() => setEditingPersona(null)} className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm">Cancel</button>
+                    <button onClick={updatePersonaFromForm} disabled={!editPersonaForm.name.trim()} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-30 text-sm font-semibold">Save</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // ═══════════════════════════════════════════
+      // CONVERSATIONS PAGE (with search + delete confirm)
+      // ═══════════════════════════════════════════
+      if (page === "conversations") {
+        const filtered = convSearch.trim() ? conversations.filter(c =>
+          (c.name || "").toLowerCase().includes(convSearch.toLowerCase()) ||
+          (c.topic || "").toLowerCase().includes(convSearch.toLowerCase()) ||
+          (c.context || "").toLowerCase().includes(convSearch.toLowerCase())
+        ) : conversations;
+        return (
+          <div className="h-screen flex flex-col bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100 anim-fade">
+            <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-700/40">
+              <button onClick={() => { setPage("home"); setConvSearch(""); setConfirmDeleteFile(null); }} className="p-2 rounded-lg hover:bg-slate-700/60 transition-colors"><IcoArrow size={18} /></button>
+              <div className="flex-1 flex items-center gap-2 bg-slate-700/40 rounded-lg px-3 py-1.5">
+                <IcoSearch size={14} className="text-slate-500 flex-shrink-0" />
+                <input type="text" value={convSearch} onChange={e => setConvSearch(e.target.value)} placeholder="Search conversations..." className="bg-transparent text-sm outline-none flex-1 placeholder-slate-500" />
+                {convSearch && <button onClick={() => setConvSearch("")} className="text-slate-500"><IcoX size={12} /></button>}
+              </div>
+              <button onClick={startNew} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold transition-colors flex-shrink-0">
+                <IcoPlus size={15} /> New
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 max-w-2xl mx-auto w-full">
+              {filtered.length === 0 ? (
+                <div className="text-center py-20">
+                  <IcoMsg size={40} className="mx-auto text-slate-700 mb-3" />
+                  <div className="text-slate-500 mb-4">{convSearch ? "No conversations match your search" : "No saved conversations yet"}</div>
+                  {!convSearch && <button onClick={startNew} className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold transition-colors">Start your first simulation</button>}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {filtered.map(c => (
+                    <div key={c.filename} className="flex items-center gap-4 p-4 rounded-2xl bg-slate-800/50 hover:bg-slate-800/80 transition-colors cursor-pointer group"
+                      onClick={() => loadConversation(c.filename)}>
+                      <div className="w-12 h-12 rounded-xl bg-emerald-600/20 flex items-center justify-center flex-shrink-0"><IcoMsg size={22} className="text-emerald-400" /></div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold truncate">{c.name}</div>
+                        <div className="text-xs text-slate-500 truncate mt-0.5">
+                          {c.topic && <span className="mr-3">{c.topic}</span>}
+                          {c.participantCount} participant{c.participantCount !== 1 ? "s" : ""} · {c.messageCount} message{c.messageCount !== 1 ? "s" : ""}
+                        </div>
+                        {c.context && <div className="text-[11px] text-cyan-400/50 truncate mt-0.5 flex items-center gap-1"><IcoBook size={10} /> {c.context}</div>}
+                        <div className="text-[10px] text-slate-600 mt-0.5">{new Date(c.savedAt).toLocaleString()}</div>
+                      </div>
+                      {confirmDeleteFile === c.filename ? (
+                        <div className="flex items-center gap-1.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
+                          <span className="text-[10px] text-red-400">Delete?</span>
+                          <button onClick={() => deleteConversation(c.filename)} className="px-2 py-1 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 text-xs font-semibold">Yes</button>
+                          <button onClick={() => setConfirmDeleteFile(null)} className="px-2 py-1 rounded-lg bg-slate-700 text-slate-400 hover:bg-slate-600 text-xs">No</button>
+                        </div>
+                      ) : (
+                        <button onClick={e => { e.stopPropagation(); setConfirmDeleteFile(c.filename); }}
+                          className="p-2 rounded-lg text-slate-600 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0"><IcoTrash size={16} /></button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      // ═══════════════════════════════════════════
+      // DEBATE SETUP PAGE
+      // ═══════════════════════════════════════════
+      if (page === "debate-setup") {
+        return (
+          <div className="h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 text-slate-100 anim-fade">
+            <div className="text-center mb-8">
+              <IcoSparkles size={40} className="text-amber-400 mx-auto mb-3" />
+              <h1 className="text-3xl font-bold mb-2">Debate Setup</h1>
+              <p className="text-slate-500 text-sm">Configure your debate topic and format</p>
+            </div>
+            <div className="w-96 space-y-6">
+              <div><label className="text-sm font-semibold mb-2 block">Debate Topic</label>
+                <input type="text" value={topic} onChange={e => setTopic(e.target.value)} placeholder="e.g. Should AI be regulated by governments?" className="w-full bg-slate-700/50 rounded-lg px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-emerald-500/40 placeholder-slate-500" />
+              </div>
+              <div><label className="text-sm font-semibold mb-3 block">Debate Format</label>
+                <div className="space-y-2">
+                  <button onClick={() => setDebateFormat("sides")} className={"w-full p-4 rounded-2xl border-2 transition-all text-left " + (debateFormat === "sides" ? "bg-emerald-600/20 border-emerald-500" : "bg-slate-800/50 border-slate-700 hover:border-slate-600")}>
+                    <div className="font-semibold">FOR vs AGAINST</div>
+                    <div className="text-xs text-slate-400 mt-1">Left 6 seats argue FOR, right 6 argue AGAINST</div>
+                  </button>
+                  <button onClick={() => setDebateFormat("freeform")} className={"w-full p-4 rounded-2xl border-2 transition-all text-left " + (debateFormat === "freeform" ? "bg-emerald-600/20 border-emerald-500" : "bg-slate-800/50 border-slate-700 hover:border-slate-600")}>
+                    <div className="font-semibold">Free-form</div>
+                    <div className="text-xs text-slate-400 mt-1">Each participant has their own position</div>
+                  </button>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button onClick={() => setPage("home")} className="flex-1 px-6 py-3 rounded-2xl bg-slate-700/60 hover:bg-slate-700 transition-all">Cancel</button>
+                <button onClick={() => { if (!topic.trim()) return; setPage("debate"); }} disabled={!topic.trim()} className="flex-1 px-6 py-3 rounded-2xl bg-emerald-600/90 hover:bg-emerald-500 disabled:opacity-30 transition-all font-semibold">Start Debate</button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // ═══════════════════════════════════════════
+      // DEBATE PAGE
+      // ═══════════════════════════════════════════
+      if (page === "debate") {
+        const debateConvMsgs = () => {
+          const m = msgsRef.current;
+          if (m.length === 0) return [{ role: "user", content: "The debate is starting. Topic: \"" + topic + "\". Share your opening thoughts." }];
+          return [{ role: "user", content: "Debate transcript so far:\n\n" + m.map(x => "[" + x.name + "]: " + x.text).join("\n\n") + "\n\nShare your thoughts on what has been discussed." }];
+        };
+
+        const debateSysPrompt = (seat, idx, side) => {
+          const len = answerLength;
+          const sideLabel = debateFormat === "sides" ? (side === "for" ? "FOR" : "AGAINST") : "neutral";
+          const scoreHint = debateScore < 50 ? "Currently AGAINST is winning (" + (100-debateScore) + ")" : debateScore > 50 ? "Currently FOR is winning (" + debateScore + ")" : "Currently neutral";
+          const lastScore = debateScoreHistory.length > 0 ? debateScoreHistory[debateScoreHistory.length - 1].score : 50;
+          return "You are " + seat.name + ", " + seat.title + ".\n\n" + seat.instructions + "\n\n" +
+            "You are in a structured debate about: \"" + topic + "\"\n" +
+            (debateFormat === "sides" ? "Your position: " + sideLabel + "\n" : "") +
+            "Debate status: Round " + debateRound + " of " + debateTotalRounds + "\n" +
+            scoreHint + "\nLast score: " + lastScore + "\n\n" +
+            (context ? "Debate context:\n" + context + "\n\n" : "") +
+            "Make compelling arguments for your position. Counter previous arguments. Use evidence and logic. Be specific and thoughtful.\n" +
+            LENGTHS[len].prompt + "\n\nDo NOT prefix with your name.";
+        };
+
+        const scoreDebate = async () => {
+          if (messages.length === 0) return;
+          const cfg = getAgentConfig(null);
+          if (!cfg.apiKey) return;
+          try {
+            const transcript = messages.filter(m => !m.isSystem).map(m => "[" + m.name + "]: " + m.text).join("\n\n");
+            const prompt = "Based on this debate about \"" + topic + "\", determine which side is winning (0=fully AGAINST, 100=fully FOR, 50=neutral). Return JSON: {\"score\": number, \"reason\": \"string (1 sentence)\"}";
+            const result = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model,
+              "You are a neutral debate judge. Evaluate arguments objectively.",
+              [{ role: "user", content: prompt + "\n\nTranscript:\n" + transcript }], 300);
+            let parsed = { score: 50, reason: "" };
+            try { parsed = JSON.parse(result); } catch (_) { const m = result.match(/(\d+)/); parsed.score = m ? parseInt(m[1]) : 50; parsed.reason = result; }
+            const newScore = Math.max(0, Math.min(100, parsed.score || 50));
+            setDebateScore(newScore);
+            setDebateScoreHistory(h => [...h, { round: debateRound, score: newScore, reason: parsed.reason }]);
+          } catch (_) {}
+        };
+
+
+        const debateSpeak = async (si) => {
+          const seat = seats[si];
+          if (!seat || !topic) { setError(!topic ? "Set a debate topic" : ""); return; }
+          const cfg = getAgentConfig(seat);
+          if (!cfg.apiKey) { setError("Set API key for " + (PROVIDERS[cfg.baseUrl]?.label || "provider") + " in Settings"); return; }
+          setError(""); setLoading(true); setLoadingSeat(si);
+          const side = debateFormat === "sides" ? (si < 6 ? "for" : "against") : "neutral";
+          const sys = debateSysPrompt(seat, si, side);
+          const conv = debateConvMsgs();
+          const temp = seat.temperature !== undefined ? seat.temperature : DEFAULT_TEMP;
+          const msg = { seatIndex: si, name: seat.name, text: "", isUser: false, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
+          addMessage(msg);
+          try {
+            await callAPIStream(cfg.apiKey, cfg.baseUrl, cfg.model, sys, conv, LENGTHS[answerLength].tokens, temp, updateLastMessage);
+          } catch (e) {
+            try {
+              const text = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model, sys, conv, LENGTHS[answerLength].tokens, temp);
+              updateLastMessage(text);
+            } catch (e2) { undoMessage(); setError("API Error: " + e2.message); }
+          }
+          setLoading(false); setLoadingSeat(null);
+        };
+
+        const debateRoundAuto = async () => {
+          if (debateRound >= debateTotalRounds || occupied.length === 0) return;
+          setDebateRunning(true);
+          const newRound = debateRound + 1;
+          setDebateRound(newRound);
+          for (const s of occupied) {
+            if (!debateRunning) break;
+            setLoadingSeat(s.idx);
+            const cfg = getAgentConfig(seats[s.idx]);
+            if (!cfg.apiKey) break;
+            const side = debateFormat === "sides" ? (s.idx < 6 ? "for" : "against") : "neutral";
+            const sys = debateSysPrompt(seats[s.idx], s.idx, side);
+            const conv = debateConvMsgs();
+            const temp = seats[s.idx].temperature !== undefined ? seats[s.idx].temperature : DEFAULT_TEMP;
+            const msg = { seatIndex: s.idx, name: s.name, text: "", isUser: false, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
+            addMessage(msg);
+            try {
+              await callAPIStream(cfg.apiKey, cfg.baseUrl, cfg.model, sys, conv, LENGTHS[answerLength].tokens, temp, updateLastMessage);
+            } catch (e) {
+              try {
+                const text = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model, sys, conv, LENGTHS[answerLength].tokens, temp);
+                updateLastMessage(text);
+              } catch (_) { break; }
+            }
+          }
+          setLoadingSeat(null);
+          if (!debateRunning) return;
+          await scoreDebate();
+          await new Promise(r => setTimeout(r, 500));
+          if (!debateRunning) return;
+          if (newRound < debateTotalRounds) {
+            debateRoundAuto();
+          } else {
+            setDebateRunning(false);
+          }
+        };
+
+        const finishDebate = async () => {
+          const cfg = getAgentConfig(null);
+          if (!cfg.apiKey) { setError("Set API key"); return; }
+          setLoading(true); setError("");
+          try {
+            const transcript = messages.filter(m => !m.isSystem).map(m => "[" + m.name + "]: " + m.text).join("\n\n");
+            const parts = occupied.map(s => s.name + " (" + s.title + ")").join(", ");
+            const finalScore = debateScore;
+            const winner = finalScore > 55 ? "FOR" : finalScore < 45 ? "AGAINST" : "Neutral";
+            const prompt = "Generate a comprehensive debate summary:\n\nTopic: " + topic + "\nFormat: " + debateFormat + "\nParticipants: " + parts + "\nFinal Score: " + finalScore + "/100 (winner: " + winner + ")\nRounds: " + debateScoreHistory.length + "\n\nProvide:\n1. Who won and by how much\n2. Key arguments from each side\n3. Turning points\n4. Statistics\n5. Meeting minutes";
+            const summary = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model,
+              "You are a professional debate analyst. Provide thorough, structured analysis.",
+              [{ role: "user", content: prompt + "\n\nTranscript:\n" + transcript }], 2000);
+            setDebateSummary(summary);
+            const tokenApprox = Math.round((messages.filter(m => !m.isSystem).reduce((a, m) => a + m.text.length / 4, 0)) + (summary.length / 4));
+            setDebateStats({ roundsCompleted: debateScoreHistory.length, totalMessages: messages.filter(m => !m.isSystem).length, approxTokens: tokenApprox, finalScore });
+            setDebateFinished(true);
+          } catch (e) { setError("Summary error: " + e.message); }
+          setLoading(false);
+        };
+
+        return (
+          <div className="h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100 flex flex-col overflow-hidden">
+            {/* Full Top Nav Bar */}
+            <div className="flex items-center gap-2 px-3 py-2 bg-slate-800/60 border-b border-slate-700/40 backdrop-blur flex-shrink-0">
+              <button onClick={() => setPage("home")} className="p-1.5 rounded-lg hover:bg-slate-700/60 text-slate-400 transition-colors flex-shrink-0" title="Home"><IcoArrow size={16} /></button>
+              <input type="text" value={topic} onChange={e => setTopic(e.target.value)} placeholder="Debate topic..."
+                className="flex-1 bg-slate-700/40 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 outline-none focus:ring-1 focus:ring-emerald-500/40 min-w-0 font-semibold" />
+              <select value={answerLength} onChange={e => setAnswerLength(e.target.value)} className="bg-slate-700/60 rounded-lg px-2 py-1.5 text-xs outline-none flex-shrink-0 cursor-pointer">
+                {Object.entries(LENGTHS).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                {Object.entries(TABLE_THEMES).map(([k,t]) => (
+                  <button key={k} onClick={() => setTableTheme(k)} title={t.label}
+                    className={"w-4 h-4 rounded-full border-2 transition-all " + (tableTheme===k ? "border-white scale-110" : "border-transparent opacity-50 hover:opacity-100")}
+                    style={{ backgroundColor: t.felt[0] }} />
+                ))}
+              </div>
+              <div className="flex items-center gap-0.5 flex-shrink-0 border-l border-slate-700/40 pl-2 ml-1">
+                <button onClick={() => setShowContext(!showContext)}
+                  className={"p-1.5 rounded-lg transition-colors " + (showContext ? "bg-cyan-600/30 text-cyan-400" : "hover:bg-slate-700/60 text-slate-400 hover:text-cyan-400")} title="Debate Context"><IcoBook size={15} /></button>
+                <button onClick={() => { setSaveName(currentSaveName || topic || ""); setShowSaveModal(true); }}
+                  className="p-1.5 rounded-lg hover:bg-slate-700/60 text-slate-400 hover:text-emerald-400 transition-colors" title="Save"><IcoSave size={15} /></button>
+                <div className="relative">
+                  <button onClick={() => setShowExportMenu(!showExportMenu)} disabled={!messages.length}
+                    className="p-1.5 rounded-lg hover:bg-slate-700/60 text-slate-400 hover:text-blue-400 disabled:opacity-30 transition-colors" title="Export"><IcoDownload size={15} /></button>
+                  {showExportMenu && (
+                    <div className="absolute right-0 top-8 z-50 bg-slate-800 border border-slate-700 rounded-xl shadow-xl py-1 w-36 anim-fade-fast">
+                      <button onClick={() => exportConversation("md")} className="w-full px-3 py-2 text-left text-xs hover:bg-slate-700/60 flex items-center gap-2"><IcoFile size={12} /> Markdown (.md)</button>
+                      <button onClick={() => exportConversation("json")} className="w-full px-3 py-2 text-left text-xs hover:bg-slate-700/60 flex items-center gap-2"><IcoFile size={12} /> JSON (.json)</button>
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => { setMessages([]); msgsRef.current = []; undoStack.current = []; setCanUndo(false); setDebateRound(0); setDebateScore(50); setDebateScoreHistory([]); }} disabled={loading || !messages.length}
+                  className="p-1.5 rounded-lg hover:bg-slate-700/60 text-slate-400 disabled:opacity-30 flex-shrink-0" title="Clear chat"><IcoTrash size={15} /></button>
+              </div>
+              <button onClick={finishDebate} disabled={loading || messages.length === 0}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-600/90 hover:bg-amber-500 disabled:opacity-30 text-xs font-semibold transition-colors flex-shrink-0">
+                <IcoFile size={13} /> Finish
+              </button>
+            </div>
+
+            {/* Score Bar */}
+            <div className="px-3 pt-2 flex-shrink-0">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-slate-400">Round {debateRound}</span>
+                <span className="text-xs text-slate-400">{debateFormat === "sides" ? "FOR vs AGAINST" : "Free-form"}</span>
+              </div>
+              <div className="relative h-6 rounded-full overflow-hidden bg-slate-700/50 border border-slate-600/40">
+                <div className="absolute inset-0 flex">
+                  <div style={{ width: (100 - debateScore) + "%", opacity: debateScore < 50 ? 0.8 : 0.3 }} className="bg-gradient-to-r from-red-600 to-red-500 transition-all duration-500" />
+                  <div style={{ width: debateScore + "%", opacity: debateScore > 50 ? 0.8 : 0.3 }} className="bg-gradient-to-r from-green-500 to-green-600 transition-all duration-500" />
+                </div>
+                <div className="absolute inset-0 flex items-center justify-between px-4 text-[10px] font-bold text-white pointer-events-none">
+                  <span>NO ({100-debateScore}%)</span>
+                  <span>YES ({debateScore}%)</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Context Panel — togglable */}
+            {showContext && (
+              <div className="mx-3 mt-2 flex-shrink-0 anim-fade-fast">
+                <div className="rounded-xl bg-slate-800/70 border border-cyan-500/20 overflow-hidden">
+                  <div className="flex items-center justify-between px-3 py-1.5 bg-cyan-500/10 border-b border-cyan-500/15">
+                    <span className="text-xs font-semibold text-cyan-300 flex items-center gap-1.5"><IcoBook size={13} /> Debate Context</span>
+                    <div className="flex items-center gap-1.5">
+                      {context && <span className="text-[10px] text-slate-500">({context.length} chars)</span>}
+                      <button onClick={() => setShowContext(false)} className="p-1 rounded-lg text-slate-500 hover:text-white transition-colors"><IcoX size={13} /></button>
+                    </div>
+                  </div>
+                  <textarea value={context} onChange={e => setContext(e.target.value)} placeholder="Add debate context, background info, rules..." rows={2} className="w-full bg-transparent px-3 py-2 text-xs text-slate-300 placeholder-slate-600 outline-none resize-y max-h-[100px]" />
+                </div>
+              </div>
+            )}
+
+            {error && (
+              <div className="mx-3 mt-2 px-3 py-1.5 rounded-lg bg-red-500/15 border border-red-500/20 text-red-300 text-xs flex items-center justify-between flex-shrink-0">
+                <span>{error}</span><button onClick={() => setError("")}><IcoX size={12} /></button>
+              </div>
+            )}
+
+            {/* Poker Table */}
+            <div className="flex-1 flex items-center justify-center p-3 overflow-hidden">
+              <div className="w-full max-w-6xl h-full flex gap-3 items-stretch">
+                <div className="flex flex-col gap-3 justify-around w-44 flex-shrink-0">
+                  {[0,1,2,3,4,5].map(i => {
+                    const seat = seats[i];
+                    const c = COLORS[i];
+                    const active = loadingSeat === i;
+                    return (
+                      <div key={i} onClick={() => openEdit(i)}
+                        style={{ borderColor: seat ? (active ? c.ring : "transparent") : undefined, background: seat ? "linear-gradient(135deg, #1e293b, #0f172a)" : undefined }}
+                        className={"cursor-pointer rounded-2xl p-3 transition-all duration-300 border-2 relative " + (seat ? "hover:scale-[1.02] shadow-lg" : "border-dashed border-slate-600 bg-slate-800/30 hover:bg-slate-800/50") + (active ? " scale-[1.03] shadow-xl" : "")}>
+                        {seat ? (
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2 mb-1">
+                              {debateFormat === "sides" && <span className="px-2 py-0.5 rounded-full bg-emerald-600/60 text-[9px] font-bold text-white">FOR</span>}
+                            </div>
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-md flex-shrink-0" style={{ backgroundColor: c.initBg }}>{seat.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}</div>
+                              <div className="min-w-0 flex-1">
+                                <div className="text-sm font-semibold text-slate-100 truncate">{seat.name}</div>
+                                <div className="text-[11px] text-slate-400 truncate">{seat.title}</div>
+                              </div>
+                            </div>
+                            {active ? (
+                              <div className="flex items-center justify-center gap-1.5 py-2">
+                                <div className="flex gap-1">{[0,1,2].map(d => <div key={d} className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: c.ring, animationDelay: d*0.15+"s" }} />)}</div>
+                                <span className="text-xs text-slate-400 ml-1">Speaking...</span>
+                              </div>
+                            ) : (
+                              <button onClick={e => { e.stopPropagation(); debateSpeak(i); }} disabled={loading} className="w-full py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:brightness-110 disabled:opacity-30 shadow-sm" style={{ backgroundColor: c.ring }}>Speak</button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center justify-center py-4 text-slate-500 gap-1"><IcoPlus size={22} /><span className="text-xs">Add</span></div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex-1 flex flex-col overflow-hidden rounded-[2.5rem] border-[6px] shadow-2xl transition-all duration-500" style={{ borderColor: th.rim, background: "radial-gradient(ellipse at 50% 40%, "+th.felt[0]+" 0%, "+th.felt[1]+" 50%, "+th.felt[2]+" 100%)", boxShadow: "inset 0 2px 20px rgba(0,0,0,0.3), 0 8px 40px rgba(0,0,0,0.4)" }}>
+                  <div ref={chatRef} className="flex-1 overflow-y-auto p-4 space-y-2.5">
+                    {messages.length === 0 ? (
+                      <div className="flex items-center justify-center h-full">
+                        <div className="text-center space-y-2" style={{ color: "rgba(255,255,255,0.15)" }}>
+                          <IcoUsers size={36} className="mx-auto" />
+                          <p className="text-sm">{topic ? "Click \"Ask to Speak\" or run auto-rounds" : "Set a topic and add participants"}</p>
+                        </div>
+                      </div>
+                    ) : messages.map((m, i) => {
+                      if (m.isSystem) return <div key={i} className="flex justify-center anim-fade"><div className="px-4 py-1.5 rounded-full bg-amber-500/15 border border-amber-500/20 text-amber-300/80 text-xs font-medium flex items-center gap-1.5"><IcoFile size={12} /> {m.text}</div></div>;
+                      const c = m.seatIndex >= 0 ? COLORS[m.seatIndex] : null;
+                      return (
+                        <div key={i} className={"flex " + (m.isUser ? "justify-end" : "justify-start") + " anim-fade"}>
+                          <div className={"max-w-[75%] rounded-2xl px-3.5 py-2.5 " + (m.isUser ? "bg-slate-500/30 rounded-br-md" : "bg-black/25 rounded-bl-md")} style={{ borderLeft: !m.isUser ? "3px solid "+(c?.ring||"#666") : undefined, borderRight: m.isUser ? "3px solid #64748b" : undefined }}>
+                            <div className="flex items-center gap-1.5 mb-1">
+                              {!m.isUser && <div className="w-5 h-5 rounded-full text-[9px] flex items-center justify-center text-white font-bold flex-shrink-0" style={{ backgroundColor: c?.ring }}>{m.name[0]}</div>}
+                              <span className="text-[11px] font-bold" style={{ color: m.isUser ? "#94a3b8" : c?.ring }}>{m.name}</span>
+                              <span className="text-[9px]" style={{ color: "rgba(255,255,255,0.15)" }}>{m.time}</span>
+                            </div>
+                            <p className="text-[13px] leading-relaxed" style={{ color: "rgba(255,255,255,0.8)" }}>{m.text || <span className="opacity-30">...</span>}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="p-3 bg-black/15 flex-shrink-0" style={{ borderTop: "1px solid "+th.border }}>
+                    <div className="flex gap-2">
+                      <input type="text" value={userInput} onChange={e => setUserInput(e.target.value)} onKeyDown={e => e.key==="Enter" && !e.shiftKey && sendUser()}
+                        placeholder="Type to participate..." className="flex-1 rounded-xl px-3 py-2 text-sm placeholder-slate-400/30 outline-none focus:ring-1 focus:ring-white/20" style={{ backgroundColor: th.inputBg }} />
+                      <button onClick={sendUser} disabled={!userInput.trim()} className="px-3 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 disabled:opacity-20 transition-all"><IcoSend size={15} /></button>
+                      <button onClick={undoMessage} disabled={loading || !canUndo}
+                        className="px-2.5 rounded-xl bg-slate-600/50 hover:bg-slate-600 disabled:opacity-20 transition-all" title="Undo last message"><IcoUndo size={14} /></button>
+                      {!debateRunning && (
+                        <div className="flex items-center gap-1">
+                          <input type="number" value={debateTotalRounds} onChange={e => setDebateTotalRounds(Math.max(1, parseInt(e.target.value) || 1))} min="1" max="50"
+                            className="w-12 rounded-lg px-2 py-2 text-xs text-center bg-slate-700/60 outline-none focus:ring-1 focus:ring-purple-500/40 text-slate-200" title="Number of rounds" />
+                          <button onClick={debateRoundAuto} disabled={loading || occupied.length === 0} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-purple-600/80 hover:bg-purple-500 disabled:opacity-20 text-xs font-semibold transition-all whitespace-nowrap">
+                            <IcoPlay size={13} /> Run Rounds
+                          </button>
+                        </div>
+                      )}
+                      {debateRunning && (
+                        <button onClick={() => setDebateRunning(false)} className="flex items-center gap-1.5 px-3 rounded-xl bg-red-600/80 hover:bg-red-500 text-xs font-semibold transition-all whitespace-nowrap">
+                          <IcoX size={13} /> Pause
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-3 justify-around w-44 flex-shrink-0">
+                  {[6,7,8,9,10,11].map(i => {
+                    const seat = seats[i];
+                    const c = COLORS[i];
+                    const active = loadingSeat === i;
+                    return (
+                      <div key={i} onClick={() => openEdit(i)}
+                        style={{ borderColor: seat ? (active ? c.ring : "transparent") : undefined, background: seat ? "linear-gradient(135deg, #1e293b, #0f172a)" : undefined }}
+                        className={"cursor-pointer rounded-2xl p-3 transition-all duration-300 border-2 relative " + (seat ? "hover:scale-[1.02] shadow-lg" : "border-dashed border-slate-600 bg-slate-800/30 hover:bg-slate-800/50") + (active ? " scale-[1.03] shadow-xl" : "")}>
+                        {seat ? (
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2 mb-1">
+                              {debateFormat === "sides" && <span className="px-2 py-0.5 rounded-full bg-red-600/60 text-[9px] font-bold text-white">AGAINST</span>}
+                            </div>
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-md flex-shrink-0" style={{ backgroundColor: c.initBg }}>{seat.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}</div>
+                              <div className="min-w-0 flex-1">
+                                <div className="text-sm font-semibold text-slate-100 truncate">{seat.name}</div>
+                                <div className="text-[11px] text-slate-400 truncate">{seat.title}</div>
+                              </div>
+                            </div>
+                            {active ? (
+                              <div className="flex items-center justify-center gap-1.5 py-2">
+                                <div className="flex gap-1">{[0,1,2].map(d => <div key={d} className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: c.ring, animationDelay: d*0.15+"s" }} />)}</div>
+                                <span className="text-xs text-slate-400 ml-1">Speaking...</span>
+                              </div>
+                            ) : (
+                              <button onClick={e => { e.stopPropagation(); debateSpeak(i); }} disabled={loading} className="w-full py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:brightness-110 disabled:opacity-30 shadow-sm" style={{ backgroundColor: c.ring }}>Speak</button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center justify-center py-4 text-slate-500 gap-1"><IcoPlus size={22} /><span className="text-xs">Add</span></div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {showExportMenu && <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />}
+
+            {/* Save Modal */}
+            {showSaveModal && (
+              <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 anim-fade-fast" onClick={() => setShowSaveModal(false)}>
+                <div className="bg-slate-800 rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl border border-slate-700/50" onClick={e => e.stopPropagation()}>
+                  <h3 className="font-bold flex items-center gap-2 mb-4"><IcoSave size={18} className="text-emerald-400" /> Save Debate</h3>
+                  <input type="text" value={saveName} onChange={e => setSaveName(e.target.value)} onKeyDown={e => e.key==="Enter" && saveName.trim() && (saveConversation(saveName.trim()), setShowSaveModal(false))}
+                    placeholder="e.g. AI Regulation Debate" autoFocus className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-emerald-500/30 mb-4" />
+                  <div className="flex gap-2 justify-end">
+                    <button onClick={() => setShowSaveModal(false)} className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm">Cancel</button>
+                    <button onClick={() => { saveConversation(saveName.trim()); setShowSaveModal(false); }} disabled={!saveName.trim()} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-30 text-sm font-semibold flex items-center gap-1.5">
+                      <IcoSave size={14} /> Save
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Debate Summary Modal */}
+            {debateFinished && (
+              <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 anim-fade-fast" onClick={() => setDebateFinished(false)}>
+                <div className="bg-slate-800 rounded-2xl p-6 w-full max-w-3xl mx-4 shadow-2xl border border-slate-700/50 max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-bold text-lg flex items-center gap-2"><IcoSparkles size={20} className="text-amber-400" /> Debate Summary</h3>
+                    <button onClick={() => setDebateFinished(false)} className="text-slate-400 hover:text-white"><IcoX size={18} /></button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto bg-slate-900/60 rounded-xl p-4 text-sm whitespace-pre-wrap leading-relaxed text-slate-300 mb-4">{debateSummary}</div>
+                  <div className="grid grid-cols-2 gap-3 mb-4 text-xs">
+                    <div className="bg-slate-700/40 rounded-lg p-3"><div className="text-slate-400">Final Score</div><div className="text-xl font-bold text-emerald-400">{debateStats.finalScore}/100</div></div>
+                    <div className="bg-slate-700/40 rounded-lg p-3"><div className="text-slate-400">Rounds</div><div className="text-xl font-bold text-emerald-400">{debateStats.roundsCompleted}</div></div>
+                    <div className="bg-slate-700/40 rounded-lg p-3"><div className="text-slate-400">Messages</div><div className="text-xl font-bold text-emerald-400">{debateStats.totalMessages}</div></div>
+                    <div className="bg-slate-700/40 rounded-lg p-3"><div className="text-slate-400">Approx Tokens</div><div className="text-xl font-bold text-emerald-400">{debateStats.approxTokens}</div></div>
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <button onClick={() => { navigator.clipboard.writeText(debateSummary); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-semibold flex items-center gap-1.5">
+                      {copied ? <><IcoCheck size={14} /> Copied!</> : <><IcoCopy size={14} /> Copy</>}
+                    </button>
+                    <button onClick={() => { setPage("home"); setDebateFinished(false); }} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold">Home</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Seat Config Modal (full version) ── */}
+            {editingSeat !== null && (
+              <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 anim-fade-fast" onClick={() => setEditingSeat(null)}>
+                <div className="bg-slate-800 rounded-2xl p-5 w-full max-w-md mx-4 shadow-2xl border border-slate-700/50 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[editingSeat % COLORS.length].ring }} />
+                      <h3 className="font-bold">Seat {editingSeat + 1} {debateFormat === "sides" ? (editingSeat < 6 ? "(FOR)" : "(AGAINST)") : ""}</h3>
+                    </div>
+                    <button onClick={() => setEditingSeat(null)} className="text-slate-400 hover:text-white"><IcoX size={18} /></button>
+                  </div>
+
+                  {personas.length > 0 && (
+                    <div className="mb-4">
+                      <button onClick={() => setShowPersonaPicker(!showPersonaPicker)}
+                        className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors mb-2">
+                        <IcoUser size={13} /> {showPersonaPicker ? "Hide library" : "Choose from library (" + personas.length + ")"}
+                      </button>
+                      {showPersonaPicker && (
+                        <div className="max-h-36 overflow-y-auto space-y-1 mb-2 bg-slate-900/40 rounded-xl p-2">
+                          {personas.map(p => (
+                            <button key={p.id} onClick={() => pickPersona(p)} className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-slate-700/60 text-left transition-colors">
+                              <div className="w-7 h-7 rounded-full bg-emerald-600/30 flex items-center justify-center text-emerald-400 text-[10px] font-bold flex-shrink-0">
+                                {p.name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()}
+                              </div>
+                              <div className="min-w-0 flex-1"><div className="text-xs font-semibold truncate">{p.name}</div><div className="text-[10px] text-slate-500 truncate">{p.title}</div></div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
+                    <div><label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Name</label>
+                      <input type="text" value={editForm.name} onChange={e => setEditForm(f => ({...f, name: e.target.value}))}
+                        placeholder="e.g. Sarah Chen" className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-emerald-500/30" /></div>
+                    <div><label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Title / Role</label>
+                      <input type="text" value={editForm.title} onChange={e => setEditForm(f => ({...f, title: e.target.value}))}
+                        placeholder="e.g. VP of Engineering" className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-emerald-500/30" /></div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[10px] text-slate-500 uppercase tracking-wider">Persona Instructions</label>
+                        <button onClick={aiAssist} disabled={genInstr}
+                          className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 disabled:opacity-40 transition-all">
+                          <IcoSparkles size={11} /> {genInstr ? "Generating..." : "AI Assist"}
+                        </button>
+                      </div>
+                      <textarea value={editForm.instructions} onChange={e => setEditForm(f => ({...f, instructions: e.target.value}))}
+                        placeholder="Communication style, priorities, personality..." rows={4}
+                        className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none resize-none focus:ring-1 focus:ring-emerald-500/30" />
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-[10px] text-slate-500 uppercase tracking-wider">Temperature</label>
+                        <span className="text-[11px] text-slate-400 font-mono">{editForm.temperature.toFixed(1)}</span>
+                      </div>
+                      <input type="range" min="0" max="2" step="0.1" value={editForm.temperature}
+                        onChange={e => setEditForm(f => ({...f, temperature: parseFloat(e.target.value)}))} className="w-full" />
+                      <div className="flex justify-between text-[9px] text-slate-600 mt-1"><span>Focused (0.0)</span><span>Balanced (0.7)</span><span>Creative (2.0)</span></div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Provider & Model</label>
+                      <div className="flex gap-2">
+                        <select value={editForm.provider || ""} onChange={e => { setEditForm(f => ({...f, provider: e.target.value, model: e.target.value ? PROVIDERS[e.target.value]?.default || "" : "" })); }} className="flex-1 bg-slate-700/60 rounded-lg px-2 py-2 text-xs outline-none cursor-pointer">
+                          <option value="">Default ({PROVIDERS[defaultProvider]?.label})</option>
+                          {Object.entries(PROVIDERS).map(([u, p]) => <option key={u} value={u}>{p.label}</option>)}
+                        </select>
+                        <select value={editForm.model || ""} onChange={e => setEditForm(f => ({...f, model: e.target.value}))} className="flex-1 bg-slate-700/60 rounded-lg px-2 py-2 text-xs outline-none cursor-pointer">
+                          <option value="">Default</option>
+                          {(PROVIDERS[editForm.provider || defaultProvider]?.models || []).map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                        </select>
+                      </div>
+                      <p className="text-[10px] text-slate-600 mt-1">Leave on Default to use the global setting, or pick a specific provider/model for this agent.</p>
+                    </div>
+                  </div>
+                  {modalError && (
+                    <div className="mt-3 px-3 py-2 rounded-lg bg-red-500/15 border border-red-500/25 text-red-300 text-xs flex items-center gap-2">
+                      <span className="flex-1">{modalError}</span><button onClick={() => setModalError("")}><IcoX size={12} /></button>
+                    </div>
+                  )}
+                  <div className="flex gap-2 mt-4">
+                    {seats[editingSeat] && <button onClick={() => removeSeat(editingSeat)} className="px-3 py-2 rounded-lg bg-red-500/15 text-red-400 hover:bg-red-500/25 text-sm">Remove</button>}
+                    <div className="flex-1" />
+                    <button onClick={() => setEditingSeat(null)} className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm">Cancel</button>
+                    <button onClick={saveSeat} disabled={!editForm.name.trim()} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-30 text-sm font-semibold">Save</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // ═══════════════════════════════════════════
+      // MEETING ROOM PAGE
+      // ═══════════════════════════════════════════
+
+      const SeatCard = ({ idx }) => {
+        const seat = seats[idx]; const c = COLORS[idx]; const active = loadingSeat === idx;
+        const pickerOpen = speakPicker === idx;
+        return (
+          <div onClick={() => openEdit(idx)}
+            style={{ borderColor: seat ? (active ? c.ring : "transparent") : undefined, background: seat ? "linear-gradient(135deg, #1e293b, #0f172a)" : undefined }}
+            className={"cursor-pointer rounded-2xl p-3 transition-all duration-300 border-2 relative " + (seat ? "hover:scale-[1.02] shadow-lg" : "border-dashed border-slate-600 bg-slate-800/30 hover:bg-slate-800/50") + (active ? " scale-[1.03] shadow-xl" : "")}>
+            {seat ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-md flex-shrink-0" style={{ backgroundColor: c.initBg }}>
+                    {seat.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-slate-100 truncate">{seat.name}</div>
+                    <div className="text-[11px] text-slate-400 truncate">{seat.title}</div>
+                  </div>
+                </div>
+                {active ? (
+                  <div className="flex items-center justify-center gap-1.5 py-2">
+                    <div className="flex gap-1">{[0,1,2].map(d => <div key={d} className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: c.ring, animationDelay: d*0.15+"s" }} />)}</div>
+                    <span className="text-xs text-slate-400 ml-1">Speaking...</span>
+                  </div>
+                ) : (
+                  <div className="relative" onClick={e => e.stopPropagation()}>
+                    <button onClick={() => setSpeakPicker(pickerOpen ? null : idx)} disabled={loading}
+                      className="w-full py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:brightness-110 disabled:opacity-30 shadow-sm" style={{ backgroundColor: c.ring }}>
+                      Ask to Speak
+                    </button>
+                    {pickerOpen && (
+                      <div className="absolute left-0 right-0 mt-1 z-50 bg-slate-800 border border-slate-600/60 rounded-xl shadow-2xl p-1 anim-fade-fast">
+                        <div className="text-[9px] text-slate-500 uppercase tracking-wider px-2 pt-1 pb-0.5">Response length</div>
+                        {LENGTH_KEYS.map(k => (
+                          <button key={k} onClick={() => speak(idx, k)}
+                            className={"w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-colors " + (k === answerLength ? "bg-slate-700/80" : "hover:bg-slate-700/50")}>
+                            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: LENGTH_COLORS[k] }} />
+                            <span className="text-xs font-semibold text-slate-200">{LENGTHS[k].label}</span>
+                            <span className="text-[10px] text-slate-500 ml-auto">{k === "mini" ? "~250ch" : LENGTHS[k].tokens + "tok"}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-4 text-slate-500 gap-1"><IcoPlus size={22} /><span className="text-xs">Add Person</span></div>
+            )}
+          </div>
+        );
+      };
+
+      return (
+        <div className="h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100 flex flex-col overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center gap-2 px-3 py-2 bg-slate-800/60 border-b border-slate-700/40 backdrop-blur flex-shrink-0">
+            <button onClick={() => setPage("home")} className="p-1.5 rounded-lg hover:bg-slate-700/60 text-slate-400 transition-colors flex-shrink-0" title="Home"><IcoArrow size={16} /></button>
+            <input type="text" value={topic} onChange={e => setTopic(e.target.value)} placeholder="Meeting topic..."
+              className="flex-1 bg-slate-700/40 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 outline-none focus:ring-1 focus:ring-emerald-500/40 min-w-0" />
+            {agenda.length === 0 && (
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <input type="text" value={agendaInput} onChange={e => setAgendaInput(e.target.value)} onKeyDown={e => e.key==="Enter" && addAgendaItem()}
+                  placeholder="+ Agenda item" className="w-28 bg-slate-700/30 rounded-lg px-2 py-1.5 text-xs placeholder-slate-600 outline-none focus:w-40 transition-all" />
+              </div>
+            )}
+            <select value={answerLength} onChange={e => setAnswerLength(e.target.value)} className="bg-slate-700/60 rounded-lg px-2 py-1.5 text-xs outline-none flex-shrink-0 cursor-pointer">
+              {Object.entries(LENGTHS).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {Object.entries(TABLE_THEMES).map(([k,t]) => (
+                <button key={k} onClick={() => setTableTheme(k)} title={t.label}
+                  className={"w-4 h-4 rounded-full border-2 transition-all " + (tableTheme===k ? "border-white scale-110" : "border-transparent opacity-50 hover:opacity-100")}
+                  style={{ backgroundColor: t.felt[0] }} />
+              ))}
+            </div>
+            <div className="flex items-center gap-0.5 flex-shrink-0 border-l border-slate-700/40 pl-2 ml-1">
+              <button onClick={() => setShowContext(!showContext)}
+                className={"p-1.5 rounded-lg transition-colors " + (showContext ? "bg-cyan-600/30 text-cyan-400" : "hover:bg-slate-700/60 text-slate-400 hover:text-cyan-400")} title="Meeting Context"><IcoBook size={15} /></button>
+              <button onClick={() => { setSaveName(currentSaveName || topic || ""); setShowSaveModal(true); }}
+                className="p-1.5 rounded-lg hover:bg-slate-700/60 text-slate-400 hover:text-emerald-400 transition-colors" title="Save"><IcoSave size={15} /></button>
+              <div className="relative">
+                <button onClick={() => setShowExportMenu(!showExportMenu)} disabled={!messages.length}
+                  className="p-1.5 rounded-lg hover:bg-slate-700/60 text-slate-400 hover:text-blue-400 disabled:opacity-30 transition-colors" title="Export"><IcoDownload size={15} /></button>
+                {showExportMenu && (
+                  <div className="absolute right-0 top-8 z-50 bg-slate-800 border border-slate-700 rounded-xl shadow-xl py-1 w-36 anim-fade-fast">
+                    <button onClick={() => exportConversation("md")} className="w-full px-3 py-2 text-left text-xs hover:bg-slate-700/60 flex items-center gap-2"><IcoFile size={12} /> Markdown (.md)</button>
+                    <button onClick={() => exportConversation("json")} className="w-full px-3 py-2 text-left text-xs hover:bg-slate-700/60 flex items-center gap-2"><IcoFile size={12} /> JSON (.json)</button>
+                  </div>
+                )}
+              </div>
+              <button onClick={() => { setMessages([]); msgsRef.current = []; undoStack.current = []; setCanUndo(false); }} disabled={loading || !messages.length}
+                className="p-1.5 rounded-lg hover:bg-slate-700/60 text-slate-400 disabled:opacity-30 flex-shrink-0" title="Clear chat"><IcoTrash size={15} /></button>
+            </div>
+            <button onClick={genMinutes} disabled={loading || !messages.length}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-600/90 hover:bg-amber-500 disabled:opacity-30 text-xs font-semibold transition-colors flex-shrink-0">
+              <IcoFile size={13} /> Minutes
+            </button>
+          </div>
+
+          {error && (
+            <div className="mx-3 mt-2 px-3 py-1.5 rounded-lg bg-red-500/15 border border-red-500/20 text-red-300 text-xs flex items-center justify-between flex-shrink-0">
+              <span>{error}</span><button onClick={() => setError("")} className="ml-2"><IcoX size={12} /></button>
+            </div>
+          )}
+
+          {/* Context Panel */}
+          {showContext && (
+            <div className="mx-3 mt-2 flex-shrink-0 anim-fade-fast">
+              <div className="rounded-xl bg-slate-800/70 border border-cyan-500/20 overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-2 bg-cyan-500/10 border-b border-cyan-500/15">
+                  <div className="flex items-center gap-2">
+                    <IcoBook size={14} className="text-cyan-400" />
+                    <span className="text-xs font-semibold text-cyan-300">Meeting Context</span>
+                    {context && <span className="text-[10px] text-slate-500">({context.length} chars)</span>}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => setAutoUpdateContext(!autoUpdateContext)} title="Auto-update after each round"
+                      className={"flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-lg transition-all " + (autoUpdateContext ? "bg-emerald-600/30 text-emerald-300" : "bg-slate-700/40 text-slate-500 hover:text-slate-300")}>
+                      Auto {autoUpdateContext ? "ON" : "OFF"}
+                    </button>
+                    <button onClick={updateContextAI} disabled={updatingContext || loading || !apiKey || messages.length === 0}
+                      className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 disabled:opacity-30 transition-all">
+                      <IcoSparkles size={11} /> {updatingContext ? "Updating..." : "AI Update"}
+                    </button>
+                    <button onClick={() => setShowContext(false)} className="p-1 rounded-lg text-slate-500 hover:text-white transition-colors"><IcoX size={13} /></button>
+                  </div>
+                </div>
+                <textarea value={context} onChange={e => setContext(e.target.value)}
+                  placeholder="Add meeting context, background info, or brief here. This will be shared with all participants and can be updated by AI during the discussion..."
+                  rows={4} className="w-full bg-transparent px-3 py-2.5 text-sm text-slate-300 placeholder-slate-600 outline-none resize-y min-h-[80px] max-h-[200px]" />
+              </div>
+            </div>
+          )}
+
+          {/* Agenda Bar */}
+          {agenda.length > 0 && (
+            <div className="px-3 pt-2 flex-shrink-0">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider flex-shrink-0 mr-1">Agenda:</span>
+                {agenda.map((item, i) => (
+                  <button key={i} onClick={() => switchAgendaItem(i)}
+                    className={"flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs whitespace-nowrap transition-all flex-shrink-0 " +
+                      (i === activeAgendaIdx ? "bg-emerald-600/80 text-white font-semibold" : "bg-slate-700/40 text-slate-400 hover:bg-slate-700/60")}>
+                    <span className="opacity-50">{i+1}.</span> {item.text}
+                    <span onClick={e => { e.stopPropagation(); removeAgendaItem(i); }} className="ml-1 opacity-0 hover:opacity-100 text-slate-500 hover:text-red-400 transition-opacity">&times;</span>
+                  </button>
+                ))}
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <input type="text" value={agendaInput} onChange={e => setAgendaInput(e.target.value)} onKeyDown={e => e.key==="Enter" && addAgendaItem()}
+                    placeholder="+ Add item" className="w-24 bg-slate-700/30 rounded-lg px-2 py-1 text-xs placeholder-slate-600 outline-none focus:w-40 transition-all" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Poker Table */}
+          <div className="flex-1 flex items-center justify-center p-3 overflow-hidden">
+            <div className="w-full max-w-6xl h-full flex gap-3 items-stretch">
+              <div className="flex flex-col gap-3 justify-around w-44 flex-shrink-0">{[0,1,2].map(i => <SeatCard key={i} idx={i} />)}</div>
+              <div className="flex-1 flex flex-col overflow-hidden rounded-[2.5rem] border-[6px] shadow-2xl transition-all duration-500"
+                style={{ borderColor: th.rim, background: "radial-gradient(ellipse at 50% 40%, "+th.felt[0]+" 0%, "+th.felt[1]+" 50%, "+th.felt[2]+" 100%)", boxShadow: "inset 0 2px 20px rgba(0,0,0,0.3), 0 8px 40px rgba(0,0,0,0.4)" }}>
+                <div ref={chatRef} className="flex-1 overflow-y-auto p-4 space-y-2.5">
+                  {messages.length === 0 ? (
+                    <div className="flex items-center justify-center h-full">
+                      <div className="text-center space-y-2" style={{ color: "rgba(255,255,255,0.15)" }}>
+                        <IcoUsers size={36} className="mx-auto" />
+                        <p className="text-sm">{topic ? "Click \"Ask to Speak\" on any participant" : "Set a topic and add participants to begin"}</p>
+                      </div>
+                    </div>
+                  ) : messages.map((m, i) => {
+                    if (m.isSystem) {
+                      return (
+                        <div key={i} className="flex justify-center anim-fade">
+                          <div className="px-4 py-1.5 rounded-full bg-amber-500/15 border border-amber-500/20 text-amber-300/80 text-xs font-medium flex items-center gap-1.5">
+                            <IcoFile size={12} /> {m.text}
+                          </div>
+                        </div>
+                      );
+                    }
+                    const c = m.seatIndex >= 0 ? COLORS[m.seatIndex] : null;
+                    return (
+                      <div key={i} className={"flex " + (m.isUser ? "justify-end" : "justify-start") + " anim-fade"}>
+                        <div className={"max-w-[75%] rounded-2xl px-3.5 py-2.5 " + (m.isUser ? "bg-slate-500/30 rounded-br-md" : "bg-black/25 rounded-bl-md")}
+                          style={{ borderLeft: !m.isUser ? "3px solid "+(c?.ring||"#666") : undefined, borderRight: m.isUser ? "3px solid #64748b" : undefined }}>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            {!m.isUser && <div className="w-5 h-5 rounded-full text-[9px] flex items-center justify-center text-white font-bold flex-shrink-0" style={{ backgroundColor: c?.ring }}>{m.name[0]}</div>}
+                            <span className="text-[11px] font-bold" style={{ color: m.isUser ? "#94a3b8" : c?.ring }}>{m.name}</span>
+                            <span className="text-[9px]" style={{ color: "rgba(255,255,255,0.15)" }}>{m.time}</span>
+                          </div>
+                          <p className="text-[13px] leading-relaxed" style={{ color: "rgba(255,255,255,0.8)" }}>{m.text || <span className="opacity-30">...</span>}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="p-3 bg-black/15 flex-shrink-0" style={{ borderTop: "1px solid "+th.border }}>
+                  <div className="flex gap-2">
+                    <input type="text" value={userInput} onChange={e => setUserInput(e.target.value)}
+                      onKeyDown={e => e.key==="Enter" && !e.shiftKey && sendUser()}
+                      placeholder="Type your message as moderator..."
+                      className="flex-1 rounded-xl px-3 py-2 text-sm placeholder-slate-400/30 outline-none focus:ring-1 focus:ring-white/20" style={{ backgroundColor: th.inputBg }} />
+                    <button onClick={sendUser} disabled={!userInput.trim()} className="px-3 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 disabled:opacity-20 transition-all"><IcoSend size={15} /></button>
+                    <button onClick={undoMessage} disabled={loading || !canUndo}
+                      className="px-2.5 rounded-xl bg-slate-600/50 hover:bg-slate-600 disabled:opacity-20 transition-all" title="Undo last message"><IcoUndo size={14} /></button>
+                    <button onClick={feedbackRound} disabled={loading || occupied.length===0}
+                      className="flex items-center gap-1.5 px-3 rounded-xl bg-purple-600/80 hover:bg-purple-500 disabled:opacity-20 text-xs font-semibold transition-all whitespace-nowrap">
+                      <IcoRotate size={13} /> Round
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-col gap-3 justify-around w-44 flex-shrink-0">{[3,4,5].map(i => <SeatCard key={i} idx={i} />)}</div>
+            </div>
+          </div>
+
+          {/* ── Seat Config Modal ── */}
+          {editingSeat !== null && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 anim-fade-fast" onClick={() => setEditingSeat(null)}>
+              <div className="bg-slate-800 rounded-2xl p-5 w-full max-w-md mx-4 shadow-2xl border border-slate-700/50 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[editingSeat].ring }} />
+                    <h3 className="font-bold">Seat {editingSeat + 1}</h3>
+                  </div>
+                  <button onClick={() => setEditingSeat(null)} className="text-slate-400 hover:text-white"><IcoX size={18} /></button>
+                </div>
+
+                {personas.length > 0 && (
+                  <div className="mb-4">
+                    <button onClick={() => setShowPersonaPicker(!showPersonaPicker)}
+                      className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors mb-2">
+                      <IcoUser size={13} /> {showPersonaPicker ? "Hide library" : "Choose from library (" + personas.length + ")"}
+                    </button>
+                    {showPersonaPicker && (
+                      <div className="max-h-36 overflow-y-auto space-y-1 mb-2 bg-slate-900/40 rounded-xl p-2">
+                        {personas.map(p => (
+                          <button key={p.id} onClick={() => pickPersona(p)} className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-slate-700/60 text-left transition-colors">
+                            <div className="w-7 h-7 rounded-full bg-emerald-600/30 flex items-center justify-center text-emerald-400 text-[10px] font-bold flex-shrink-0">
+                              {p.name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()}
+                            </div>
+                            <div className="min-w-0 flex-1"><div className="text-xs font-semibold truncate">{p.name}</div><div className="text-[10px] text-slate-500 truncate">{p.title}</div></div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <div><label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Name</label>
+                    <input type="text" value={editForm.name} onChange={e => setEditForm(f => ({...f, name: e.target.value}))}
+                      placeholder="e.g. Sarah Chen" className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-emerald-500/30" /></div>
+                  <div><label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Title / Role</label>
+                    <input type="text" value={editForm.title} onChange={e => setEditForm(f => ({...f, title: e.target.value}))}
+                      placeholder="e.g. VP of Engineering" className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-emerald-500/30" /></div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[10px] text-slate-500 uppercase tracking-wider">Persona Instructions</label>
+                      <button onClick={aiAssist} disabled={genInstr}
+                        className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 disabled:opacity-40 transition-all">
+                        <IcoSparkles size={11} /> {genInstr ? "Generating..." : "AI Assist"}
+                      </button>
+                    </div>
+                    <textarea value={editForm.instructions} onChange={e => setEditForm(f => ({...f, instructions: e.target.value}))}
+                      placeholder="Communication style, priorities, personality..." rows={4}
+                      className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none resize-none focus:ring-1 focus:ring-emerald-500/30" />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[10px] text-slate-500 uppercase tracking-wider">Temperature</label>
+                      <span className="text-[11px] text-slate-400 font-mono">{editForm.temperature.toFixed(1)}</span>
+                    </div>
+                    <input type="range" min="0" max="2" step="0.1" value={editForm.temperature}
+                      onChange={e => setEditForm(f => ({...f, temperature: parseFloat(e.target.value)}))} className="w-full" />
+                    <div className="flex justify-between text-[9px] text-slate-600 mt-1"><span>Focused (0.0)</span><span>Balanced (0.7)</span><span>Creative (2.0)</span></div>
+                    <p className="text-[10px] text-slate-600 mt-1.5 leading-relaxed">Controls response randomness. Lower values produce more consistent, predictable responses. Higher values produce more creative, varied, and sometimes surprising responses. Default is 0.7.</p>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Provider & Model</label>
+                    <div className="flex gap-2">
+                      <select value={editForm.provider || ""} onChange={e => { setEditForm(f => ({...f, provider: e.target.value, model: e.target.value ? PROVIDERS[e.target.value]?.default || "" : "" })); }} className="flex-1 bg-slate-700/60 rounded-lg px-2 py-2 text-xs outline-none cursor-pointer">
+                        <option value="">Default ({PROVIDERS[defaultProvider]?.label})</option>
+                        {Object.entries(PROVIDERS).map(([u, p]) => <option key={u} value={u}>{p.label}</option>)}
+                      </select>
+                      <select value={editForm.model || ""} onChange={e => setEditForm(f => ({...f, model: e.target.value}))} className="flex-1 bg-slate-700/60 rounded-lg px-2 py-2 text-xs outline-none cursor-pointer">
+                        <option value="">Default</option>
+                        {(PROVIDERS[editForm.provider || defaultProvider]?.models || []).map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                      </select>
+                    </div>
+                    <p className="text-[10px] text-slate-600 mt-1">Leave on Default to use the global setting, or pick a specific provider/model for this agent.</p>
+                  </div>
+                </div>
+                {modalError && (
+                  <div className="mt-3 px-3 py-2 rounded-lg bg-red-500/15 border border-red-500/25 text-red-300 text-xs flex items-center gap-2">
+                    <span className="flex-1">{modalError}</span><button onClick={() => setModalError("")}><IcoX size={12} /></button>
+                  </div>
+                )}
+                <div className="flex gap-2 mt-4">
+                  {seats[editingSeat] && <button onClick={() => removeSeat(editingSeat)} className="px-3 py-2 rounded-lg bg-red-500/15 text-red-400 hover:bg-red-500/25 text-sm">Remove</button>}
+                  <div className="flex-1" />
+                  <button onClick={() => setEditingSeat(null)} className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm">Cancel</button>
+                  <button onClick={saveSeat} disabled={!editForm.name.trim()} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-30 text-sm font-semibold">Save</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Save Modal ── */}
+          {showSaveModal && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 anim-fade-fast" onClick={() => setShowSaveModal(false)}>
+              <div className="bg-slate-800 rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl border border-slate-700/50" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-bold flex items-center gap-2"><IcoSave size={18} className="text-emerald-400" /> Save Conversation</h3>
+                  <button onClick={() => setShowSaveModal(false)} className="text-slate-400 hover:text-white"><IcoX size={18} /></button>
+                </div>
+                <div><label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Name</label>
+                  <input type="text" value={saveName} onChange={e => setSaveName(e.target.value)}
+                    onKeyDown={e => e.key==="Enter" && saveName.trim() && (saveConversation(saveName.trim()), setShowSaveModal(false))}
+                    placeholder="e.g. Q1 Budget Review" autoFocus
+                    className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-emerald-500/30" /></div>
+                <div className="flex gap-2 mt-4 justify-end">
+                  <button onClick={() => setShowSaveModal(false)} className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm">Cancel</button>
+                  <button onClick={() => { saveConversation(saveName.trim()); setShowSaveModal(false); }} disabled={!saveName.trim()}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-30 text-sm font-semibold flex items-center gap-1.5">
+                    <IcoSave size={14} /> Save
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Minutes Modal ── */}
+          {showMinutes && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 anim-fade-fast" onClick={() => setShowMinutes(false)}>
+              <div className="bg-slate-800 rounded-2xl p-5 w-full max-w-2xl mx-4 shadow-2xl border border-slate-700/50 max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-bold flex items-center gap-2"><IcoFile size={18} className="text-amber-400" /> Meeting Minutes</h3>
+                  <button onClick={() => setShowMinutes(false)} className="text-slate-400 hover:text-white"><IcoX size={18} /></button>
+                </div>
+                <div className="flex-1 overflow-y-auto bg-slate-900/60 rounded-xl p-4 text-sm whitespace-pre-wrap leading-relaxed text-slate-300">{minutesText}</div>
+                <button onClick={() => { navigator.clipboard.writeText(minutesText); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                  className="mt-3 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold self-end flex items-center gap-1.5">
+                  {copied ? <><IcoCheck size={14} /> Copied!</> : <><IcoCopy size={14} /> Copy</>}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Close popups on outside click */}
+          {showExportMenu && <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />}
+          {speakPicker !== null && <div className="fixed inset-0 z-40" onClick={() => setSpeakPicker(null)} />}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
