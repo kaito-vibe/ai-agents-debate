@@ -525,6 +525,14 @@
         const key = apiKeys[provider] || "";
         return { apiKey: key, baseUrl: provider, model };
       };
+      const getModelLabel = (seat) => {
+        const provider = seat?.provider || defaultProvider;
+        const model = seat?.model || defaultModel;
+        const prov = PROVIDERS[provider];
+        if (!prov) return model;
+        const m = prov.models.find(x => x.value === model);
+        return m ? m.label.replace(/ \(.*\)/, "") : model;
+      };
 
       // AI context update
       const updateContextAI = async () => {
@@ -1795,6 +1803,7 @@ Table: | # | Argument | Strength Assessment |
                               <div className="min-w-0 flex-1 cursor-pointer hover:opacity-80" onClick={() => openEdit(i)} title="Edit persona">
                                 <div className="text-sm font-semibold text-slate-100 truncate">{seat.name}</div>
                                 <div className="text-[11px] text-slate-400 truncate">{seat.title}</div>
+                                <div className="text-[9px] text-slate-500 truncate">{getModelLabel(seat)}</div>
                               </div>
                             </div>
                             {active ? (
@@ -1901,6 +1910,7 @@ Table: | # | Argument | Strength Assessment |
                               <div className="min-w-0 flex-1 cursor-pointer hover:opacity-80" onClick={() => openEdit(i)} title="Edit persona">
                                 <div className="text-sm font-semibold text-slate-100 truncate">{seat.name}</div>
                                 <div className="text-[11px] text-slate-400 truncate">{seat.title}</div>
+                                <div className="text-[9px] text-slate-500 truncate">{getModelLabel(seat)}</div>
                               </div>
                             </div>
                             {active ? (
@@ -2115,6 +2125,7 @@ Table: | # | Argument | Strength Assessment |
                   <div className="min-w-0 flex-1 cursor-pointer hover:opacity-80" onClick={() => openEdit(idx)} title="Edit persona">
                     <div className="text-sm font-semibold text-slate-100 truncate">{seat.name}</div>
                     <div className="text-[11px] text-slate-400 truncate">{seat.title}</div>
+                    <div className="text-[9px] text-slate-500 truncate">{getModelLabel(seat)}</div>
                   </div>
                 </div>
                 {active ? (
