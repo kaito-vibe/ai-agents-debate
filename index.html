@@ -1499,9 +1499,17 @@ Return the array starting with [ and ending with ]. Nothing else.`;
             // Use last 10 messages for scoring to keep it fast
             const recent = nonSystemMsgs.slice(-10);
             const transcript = recent.map(m => "[" + m.name + "]: " + m.text).join("\n\n");
-            const prompt = "Based on this debate about \"" + topic + "\", determine which side is winning (0=fully AGAINST, 100=fully FOR, 50=neutral). Return JSON: {\"score\": number, \"reason\": \"string (1 sentence)\"}";
+            const prevScore = debateScoreRef.current;
+            const history = debateHistoryRef.current;
+            const historyStr = history.length > 0
+              ? "\n\nScore history: " + history.slice(-5).map(h => "Round " + h.round + ": " + h.score + "% FOR (" + h.reason + ")").join("; ")
+              : "";
+            const ctxStr = contextRef.current ? "\n\nDebate context summary:\n" + contextRef.current.slice(0, 500) : "";
+            const prompt = "Debate topic: \"" + topic + "\"\nCurrent score: " + prevScore + "% FOR / " + (100 - prevScore) + "% AGAINST" +
+              historyStr + ctxStr +
+              "\n\nBased on the RECENT messages below, adjust the score. The score should move incrementally — large swings only if a speaker made a truly devastating argument. Scale: 0=fully AGAINST, 100=fully FOR, 50=tied.\n\nReturn JSON: {\"score\": number, \"reason\": \"string (1 sentence explaining what shifted)\"}";
             const result = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model,
-              "You are a neutral debate judge. Evaluate arguments objectively. Reply with only valid JSON.",
+              "You are a neutral debate judge. Evaluate arguments objectively. The score should evolve gradually based on new arguments, not be re-decided from scratch each time. Reply with only valid JSON.",
               [{ role: "user", content: prompt + "\n\nRecent transcript:\n" + transcript }], 200);
             let parsed = { score: 50, reason: "" };
             try {
