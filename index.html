@@ -427,8 +427,8 @@
       const loadState = (s) => {
         if (s.seats) {
           // Ensure debate mode has 12 seats
-          if (s.simMode === "debate" && s.seats.length < 16) {
-            const expanded = [...s.seats, ...Array(16 - s.seats.length).fill(null)];
+          if (s.simMode === "debate" && s.seats.length < 14) {
+            const expanded = [...s.seats, ...Array(14 - s.seats.length).fill(null)];
             setSeats(expanded);
           } else { setSeats(s.seats); }
         }
@@ -503,7 +503,7 @@
 
       // ── New debate ──
       const startNewDebate = () => {
-        setSeats(Array(16).fill(null)); setMessages([]); msgsRef.current = [];
+        setSeats(Array(14).fill(null)); setMessages([]); msgsRef.current = [];
         setTopic(""); setTableTheme("brown"); setCurrentSaveName(""); setError("");
         setAgenda([]); setActiveAgendaIdx(-1); setAgendaInput("");
         setContext(""); setShowContext(false); undoStack.current = []; setCanUndo(false);
@@ -524,7 +524,7 @@
       const occupied = (() => {
         if (simMode !== "debate") return seats.map((s, i) => (s ? { ...s, idx: i } : null)).filter(Boolean);
         const left = [], right = [];
-        seats.forEach((s, i) => { if (s) { if (i < 8) left.push({ ...s, idx: i }); else right.push({ ...s, idx: i }); } });
+        seats.forEach((s, i) => { if (s) { if (i < 7) left.push({ ...s, idx: i }); else right.push({ ...s, idx: i }); } });
         const result = [];
         const max = Math.max(left.length, right.length);
         for (let i = 0; i < max; i++) {
@@ -1223,7 +1223,7 @@ Return the array starting with [ and ending with ]. Nothing else.`;
               }
             }
             if (!Array.isArray(arr) || arr.length === 0) throw new Error("Expected a non-empty array");
-            const clean = arr.filter(p => p && p.name && p.title && p.instructions).slice(0, 16);
+            const clean = arr.filter(p => p && p.name && p.title && p.instructions).slice(0, 14);
             if (clean.length === 0) throw new Error("Personas missing required fields");
             setPersonaSuggestions(clean);
             setSelectedSuggestions(new Set(clean.map((_, i) => i)));
@@ -1233,17 +1233,17 @@ Return the array starting with [ and ending with ]. Nothing else.`;
         };
 
         const addSelectedPersonas = () => {
-          const toAdd = personaSuggestions.filter((_, i) => selectedSuggestions.has(i)).slice(0, 16);
+          const toAdd = personaSuggestions.filter((_, i) => selectedSuggestions.has(i)).slice(0, 14);
           const newSeats = [...seats];
           for (const p of toAdd) {
             // Find best slot based on side
             let slot = -1;
             if (debateFormat === "sides") {
-              const range = p.side === "against" ? [8, 16] : [0, 8];
+              const range = p.side === "against" ? [7, 14] : [0, 7];
               for (let i = range[0]; i < range[1]; i++) { if (!newSeats[i]) { slot = i; break; } }
-              if (slot === -1) { for (let i = 0; i < 16; i++) { if (!newSeats[i]) { slot = i; break; } } }
+              if (slot === -1) { for (let i = 0; i < 14; i++) { if (!newSeats[i]) { slot = i; break; } } }
             } else {
-              for (let i = 0; i < 16; i++) { if (!newSeats[i]) { slot = i; break; } }
+              for (let i = 0; i < 14; i++) { if (!newSeats[i]) { slot = i; break; } }
             }
             if (slot === -1) break;
             newSeats[slot] = { name: p.name, title: p.title, instructions: p.instructions, temperature: DEFAULT_TEMP, imageUrl: p.imageUrl || null, profileUrl: p.profileUrl || null, side: p.side || null };
@@ -1417,7 +1417,7 @@ Return the array starting with [ and ending with ]. Nothing else.`;
                     <button onClick={() => setShowSuggestions(false)} className="px-5 py-2.5 rounded-xl bg-slate-700/60 hover:bg-slate-700 transition-all text-sm">Cancel</button>
                     <button onClick={addSelectedPersonas} disabled={selectedSuggestions.size === 0}
                       className="flex-1 py-2.5 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 disabled:opacity-30 transition-all font-semibold text-sm">
-                      {selectedSuggestions.size === 0 ? "Select personas to add" : "Add " + Math.min(selectedSuggestions.size, 16) + " Personas & Start Debate" + (selectedSuggestions.size > 16 ? " (capped at 16)" : "")}
+                      {selectedSuggestions.size === 0 ? "Select personas to add" : "Add " + Math.min(selectedSuggestions.size, 14) + " Personas & Start Debate" + (selectedSuggestions.size > 14 ? " (capped at 14)" : "")}
                     </button>
                   </div>
                 </div>
@@ -1477,7 +1477,7 @@ Return the array starting with [ and ending with ]. Nothing else.`;
         // Helper: get effective side for a seat (explicit override > index default)
         const getSeatSide = (seat, idx) => {
           if (seat && seat.side) return seat.side;
-          return debateFormat === "sides" ? (idx < 8 ? "for" : "against") : "neutral";
+          return debateFormat === "sides" ? (idx < 7 ? "for" : "against") : "neutral";
         };
 
         // Cycle a seat's side override on click
@@ -1749,9 +1749,14 @@ Table: | # | Argument | Strength Assessment |
                   className="p-1.5 rounded-lg hover:bg-slate-700/60 text-slate-400 disabled:opacity-30 flex-shrink-0" title="Clear chat"><IcoTrash size={15} /></button>
               </div>
               {debateIsFinished ? (
-                <button onClick={() => setDebateFinished(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700/60 text-emerald-300 text-xs font-semibold flex-shrink-0 border border-emerald-600/30">
-                  ✓ Concluded — View Summary
-                </button>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <button onClick={() => setDebateFinished(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700/60 text-emerald-300 text-xs font-semibold border border-emerald-600/30">
+                    ✓ View Summary
+                  </button>
+                  <button onClick={() => { setDebateIsFinished(false); setDebateFinished(false); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-700/60 text-purple-300 text-xs font-semibold border border-purple-600/30 hover:bg-purple-600/60 transition-colors">
+                    ↻ Re-open
+                  </button>
+                </div>
               ) : (
                 <button onClick={finishDebate} disabled={loading || messages.length === 0}
                   className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-600/90 hover:bg-amber-500 disabled:opacity-30 text-xs font-semibold transition-colors flex-shrink-0">
@@ -1812,7 +1817,7 @@ Table: | # | Argument | Strength Assessment |
             <div className="flex-1 flex items-center justify-center p-3 overflow-hidden">
               <div className="w-full max-w-6xl h-full flex gap-3 items-stretch">
                 <div className="flex flex-col gap-3 justify-around w-44 flex-shrink-0">
-                  {[0,1,2,3,4,5,6,7].map(i => {
+                  {[0,1,2,3,4,5,6].map(i => {
                     const seat = seats[i];
                     const c = COLORS[i];
                     const active = loadingSeat === i;
@@ -1824,6 +1829,7 @@ Table: | # | Argument | Strength Assessment |
                           <div className="absolute top-1 right-1 flex flex-col opacity-0 group-hover:opacity-100 transition-opacity z-10">
                             {i > 0 && <button onClick={() => swapSeats(i, i - 1)} className="p-0.5 rounded hover:bg-slate-600/80 text-slate-400 hover:text-white text-[10px] leading-none" title="Move up">▲</button>}
                             {i < seats.length - 1 && <button onClick={() => swapSeats(i, i + 1)} className="p-0.5 rounded hover:bg-slate-600/80 text-slate-400 hover:text-white text-[10px] leading-none" title="Move down">▼</button>}
+                            <button onClick={() => { const half = Math.floor(seats.length / 2); swapSeats(i, i < half ? i + half : i - half); }} className="p-0.5 rounded hover:bg-slate-600/80 text-slate-400 hover:text-white text-[10px] leading-none" title="Move to other side">{i < Math.floor(seats.length / 2) ? "▶" : "◀"}</button>
                           </div>
                         )}
                         {seat ? (
@@ -1919,7 +1925,7 @@ Table: | # | Argument | Strength Assessment |
                   </div>
                 </div>
                 <div className="flex flex-col gap-3 justify-around w-44 flex-shrink-0">
-                  {[8,9,10,11,12,13,14,15].map(i => {
+                  {[7,8,9,10,11,12,13].map(i => {
                     const seat = seats[i];
                     const c = COLORS[i];
                     const active = loadingSeat === i;
@@ -1931,6 +1937,7 @@ Table: | # | Argument | Strength Assessment |
                           <div className="absolute top-1 right-1 flex flex-col opacity-0 group-hover:opacity-100 transition-opacity z-10">
                             {i > 0 && <button onClick={() => swapSeats(i, i - 1)} className="p-0.5 rounded hover:bg-slate-600/80 text-slate-400 hover:text-white text-[10px] leading-none" title="Move up">▲</button>}
                             {i < seats.length - 1 && <button onClick={() => swapSeats(i, i + 1)} className="p-0.5 rounded hover:bg-slate-600/80 text-slate-400 hover:text-white text-[10px] leading-none" title="Move down">▼</button>}
+                            <button onClick={() => { const half = Math.floor(seats.length / 2); swapSeats(i, i < half ? i + half : i - half); }} className="p-0.5 rounded hover:bg-slate-600/80 text-slate-400 hover:text-white text-[10px] leading-none" title="Move to other side">{i < Math.floor(seats.length / 2) ? "▶" : "◀"}</button>
                           </div>
                         )}
                         {seat ? (
