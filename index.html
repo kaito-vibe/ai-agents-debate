@@ -1368,7 +1368,7 @@ Return the array starting with [ and ending with ]. Nothing else.`;
           return "You are " + seat.name + ", " + seat.title + ".\n\n" + seat.instructions + "\n\n" +
             "You are in a structured debate about: \"" + topic + "\"\n" +
             (debateFormat === "sides" ? "Your position: " + sideLabel + "\n" : "") +
-            "Debate status: Round " + round + " of " + debateTotalRounds + "\n" +
+            "Debate status: Round " + round + "\n" +
             scoreHint + " (last scored: " + lastScore + "/100)\n\n" +
             (context ? "Debate context:\n" + context + "\n\n" : "") +
             LENGTHS[answerLength].prompt + "\n\n" +
@@ -1487,12 +1487,13 @@ Return the array starting with [ and ending with ]. Nothing else.`;
 
         const debateRoundAuto = async () => {
           if (occupied.length === 0) return;
-          // Capture values at invocation time — avoids stale closure across rounds
-          const total = debateTotalRounds;
+          // Run N additional rounds from current position
+          const roundsToRun = debateTotalRounds;
           let round = debateRound;
+          const target = round + roundsToRun;
           debateRunningRef.current = true;
           setDebateRunning(true);
-          while (round < total && debateRunningRef.current) {
+          while (round < target && debateRunningRef.current) {
             round++;
             setDebateRound(round);
             for (const s of occupied) {
@@ -1521,7 +1522,7 @@ Return the array starting with [ and ending with ]. Nothing else.`;
             if (!debateRunningRef.current) break;
             // Auto-build debate context at end of each round
             await updateDebateContext(round);
-            if (round < total && debateRunningRef.current) {
+            if (round < target && debateRunningRef.current) {
               await new Promise(r => setTimeout(r, 200));
             }
           }
@@ -1651,7 +1652,7 @@ Table: | # | Argument | Strength Assessment |
             {/* Score Bar */}
             <div className="px-3 pt-2 flex-shrink-0">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-slate-400">Round {debateRound}/{debateTotalRounds}</span>
+                <span className="text-xs text-slate-400">Round {debateRound}</span>
                 <div className="flex items-center gap-2">
                   {scoringInProgress && <span className="text-[10px] text-amber-400 flex items-center gap-0.5"><span className="animate-spin inline-block">⟳</span> Scoring…</span>}
                   <span className="text-xs text-slate-400">{debateFormat === "sides" ? "FOR vs AGAINST" : "Free-form"}</span>
