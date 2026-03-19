@@ -906,10 +906,8 @@
 
         const TABS = [
           { id: "all",         label: "All",        count: conversations.length },
-          { id: "debates",     label: "Debates",    count: debates.length },
           { id: "completed",   label: "Completed",  count: completed.length },
           { id: "in-progress", label: "In Progress", count: inProgress.length },
-          { id: "meetings",    label: "Meetings",   count: meetings.length },
         ];
 
         return (
@@ -1370,6 +1368,36 @@ Return the array starting with [ and ending with ]. Nothing else.`;
           scoreDebate(); // fire-and-forget — score bar updates in background
         };
 
+        // Auto-build debate context after each round
+        const updateDebateContext = async (roundNum) => {
+          const cfg = getAgentConfig(null);
+          if (!cfg.apiKey) return;
+          const nonSystem = msgsRef.current.filter(m => !m.isSystem);
+          if (nonSystem.length === 0) return;
+          setUpdatingContext(true);
+          try {
+            const recent = nonSystem.slice(-20);
+            const transcript = recent.map(m => "[" + m.name + "]: " + m.text).join("\n\n");
+            const parts = occupied.map(s => {
+              const side = getSeatSide(s, s.idx);
+              return s.name + " (" + s.title + ", " + side.toUpperCase() + ")";
+            }).join(", ");
+            const score = debateScoreRef.current;
+            const scoreLabel = score > 55 ? "FOR leading (" + score + "%)" : score < 45 ? "AGAINST leading (" + (100-score) + "%)" : "Tied (" + score + "%)";
+            const text = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model,
+              "You are a debate analyst. Update the running debate context document. Be concise and structured. Max 250 words.",
+              [{ role: "user", content: "Debate topic: \"" + topic + "\"\nFormat: " + (debateFormat === "sides" ? "FOR vs AGAINST" : "Free-form") +
+                "\nRound: " + roundNum + " of " + debateTotalRounds +
+                "\nScore: " + scoreLabel +
+                "\nParticipants: " + parts +
+                (context ? "\n\nPrevious context:\n" + context : "") +
+                "\n\nRecent transcript:\n" + transcript +
+                "\n\nGenerate an updated debate context covering: strongest arguments made so far per side, key rebuttals, unaddressed points, and the current momentum." }], 500);
+            setContext(text); setShowContext(true);
+          } catch (e) { console.error("Debate context update failed:", e.message); }
+          setUpdatingContext(false);
+        };
+
         const debateRoundAuto = async () => {
           if (occupied.length === 0) return;
           // Capture values at invocation time — avoids stale closure across rounds
@@ -1404,6 +1432,8 @@ Return the array starting with [ and ending with ]. Nothing else.`;
             }
             setLoadingSeat(null);
             if (!debateRunningRef.current) break;
+            // Auto-build debate context at end of each round
+            await updateDebateContext(round);
             if (round < total && debateRunningRef.current) {
               await new Promise(r => setTimeout(r, 200));
             }
@@ -1558,13 +1588,17 @@ Table: | # | Argument | Strength Assessment |
               <div className="mx-3 mt-2 flex-shrink-0 anim-fade-fast">
                 <div className="rounded-xl bg-slate-800/70 border border-cyan-500/20 overflow-hidden">
                   <div className="flex items-center justify-between px-3 py-1.5 bg-cyan-500/10 border-b border-cyan-500/15">
-                    <span className="text-xs font-semibold text-cyan-300 flex items-center gap-1.5"><IcoBook size={13} /> Debate Context</span>
+                    <span className="text-xs font-semibold text-cyan-300 flex items-center gap-1.5"><IcoBook size={13} /> Debate Context {updatingContext && <span className="text-[10px] text-amber-400 animate-pulse">updating...</span>}</span>
                     <div className="flex items-center gap-1.5">
                       {context && <span className="text-[10px] text-slate-500">({context.length} chars)</span>}
+                      <button onClick={() => updateDebateContext(debateRound)} disabled={updatingContext || msgsRef.current.filter(m => !m.isSystem).length === 0}
+                        className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-lg bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 disabled:opacity-30 transition-all">
+                        <IcoSparkles size={11} /> {updatingContext ? "Updating..." : "AI Update"}
+                      </button>
                       <button onClick={() => setShowContext(false)} className="p-1 rounded-lg text-slate-500 hover:text-white transition-colors"><IcoX size={13} /></button>
                     </div>
                   </div>
-                  <textarea value={context} onChange={e => setContext(e.target.value)} placeholder="Add debate context, background info, rules..." rows={2} className="w-full bg-transparent px-3 py-2 text-xs text-slate-300 placeholder-slate-600 outline-none resize-y max-h-[100px]" />
+                  <textarea value={context} onChange={e => setContext(e.target.value)} placeholder="Auto-builds after each round. You can also edit manually..." rows={3} className="w-full bg-transparent px-3 py-2 text-xs text-slate-300 placeholder-slate-600 outline-none resize-y max-h-[150px]" />
                 </div>
               </div>
             )}
