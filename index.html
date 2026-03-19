@@ -1357,7 +1357,10 @@ Return the array starting with [ and ending with ]. Nothing else.`;
           const lastMsg = recent[recent.length - 1];
           const transcript = recent.map(x => "[" + x.name + "]: " + x.text).join("\n\n");
           const prefix = skipped > 0 ? "[" + skipped + " earlier messages omitted for brevity]\n\n" : "";
-          return [{ role: "user", content: prefix + "Debate transcript:\n\n" + transcript + "\n\n---\n\n" + lastMsg.name + " just made the above argument. Directly respond to their specific points — refute, challenge, or build on them — then advance your own position. Stay fully in character." }];
+          const tail = lastMsg.isUser
+            ? "The moderator just said: \"" + lastMsg.text + "\"\n\nYou MUST directly address the moderator's question or comment first, then continue the debate. Stay fully in character."
+            : lastMsg.name + " just made the above argument. Directly respond to their specific points — refute, challenge, or build on them — then advance your own position. Stay fully in character.";
+          return [{ role: "user", content: prefix + "Debate transcript:\n\n" + transcript + "\n\n---\n\n" + tail }];
         };
 
         const debateSysPrompt = (seat, idx, side, liveRound, liveScore, liveHistory) => {
