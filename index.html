@@ -1438,9 +1438,18 @@ Return the array starting with [ and ending with ]. Nothing else.`;
           const lastMsg = recent[recent.length - 1];
           const transcript = recent.map(x => "[" + x.name + "]: " + x.text).join("\n\n");
           const prefix = skipped > 0 ? "[" + skipped + " earlier messages omitted for brevity]\n\n" : "";
+          // Find moderator message within last 12 messages so all speakers in this round see it
+          let moderatorNote = "";
+          const lookback = recent.slice(-12);
+          for (let j = lookback.length - 1; j >= 0; j--) {
+            if (lookback[j].isUser) {
+              moderatorNote = "\n\nIMPORTANT — The moderator said: \"" + lookback[j].text + "\"\nYou MUST address the moderator's question or comment in your response.";
+              break;
+            }
+          }
           const tail = lastMsg.isUser
             ? "The moderator just said: \"" + lastMsg.text + "\"\n\nYou MUST directly address the moderator's question or comment first, then continue the debate. Stay fully in character."
-            : lastMsg.name + " just made the above argument. Directly respond to their specific points — refute, challenge, or build on them — then advance your own position. Stay fully in character.";
+            : lastMsg.name + " just made the above argument. Directly respond to their specific points — refute, challenge, or build on them — then advance your own position. Stay fully in character." + moderatorNote;
           return [{ role: "user", content: prefix + "Debate transcript:\n\n" + transcript + "\n\n---\n\n" + tail }];
         };
 
@@ -1539,7 +1548,7 @@ Return the array starting with [ and ending with ]. Nothing else.`;
                 (contextRef.current ? "\n\nPrevious context:\n" + contextRef.current : "") +
                 "\n\nRecent transcript:\n" + transcript +
                 "\n\nGenerate an updated debate context covering: strongest arguments made so far per side, key rebuttals, unaddressed points, and the current momentum." }], 500);
-            setContext(text); setShowContext(true);
+            setContext(text);
           } catch (e) { console.error("Debate context update failed:", e.message); setError("Context update failed: " + e.message); }
           setUpdatingContext(false);
         };
