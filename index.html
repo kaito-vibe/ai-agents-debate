@@ -1428,31 +1428,7 @@ Return the array starting with [ and ending with ]. Nothing else.`;
         };
 
 
-        const debateSpeak = async (si) => {
-          const seat = seats[si];
-          if (!seat || !topic) { setError(!topic ? "Set a debate topic" : ""); return; }
-          const cfg = getAgentConfig(seat);
-          if (!cfg.apiKey) { setError("Set API key for " + (PROVIDERS[cfg.baseUrl]?.label || "provider") + " in Settings"); return; }
-          setError(""); setLoading(true); setLoadingSeat(si);
-          const side = getSeatSide(seat, si);
-          const sys = debateSysPrompt(seat, si, side, debateRound, debateScoreRef.current, debateHistoryRef.current);
-          const conv = debateConvMsgs();
-          const temp = seat.temperature !== undefined ? seat.temperature : DEFAULT_TEMP;
-          const msg = { seatIndex: si, name: seat.name, text: "", isUser: false, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
-          addMessage(msg);
-          try {
-            await callAPIStream(cfg.apiKey, cfg.baseUrl, cfg.model, sys, conv, LENGTHS[answerLength].tokens, temp, updateLastMessage);
-          } catch (e) {
-            try {
-              const text = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model, sys, conv, LENGTHS[answerLength].tokens, temp);
-              updateLastMessage(text);
-            } catch (e2) { undoMessage(); setError("API Error: " + e2.message); }
-          }
-          setLoading(false); setLoadingSeat(null);
-          scoreDebate(); // fire-and-forget — score bar updates in background
-        };
-
-        // Auto-build debate context after each round
+        // Auto-build debate context after each round (or every few manual messages)
         const updateDebateContext = async (roundNum) => {
           const cfg = getAgentConfig(null);
           if (!cfg.apiKey) return;
@@ -1478,8 +1454,35 @@ Return the array starting with [ and ending with ]. Nothing else.`;
                 "\n\nRecent transcript:\n" + transcript +
                 "\n\nGenerate an updated debate context covering: strongest arguments made so far per side, key rebuttals, unaddressed points, and the current momentum." }], 500);
             setContext(text); setShowContext(true);
-          } catch (e) { console.error("Debate context update failed:", e.message); }
+          } catch (e) { console.error("Debate context update failed:", e.message); setError("Context update failed: " + e.message); }
           setUpdatingContext(false);
+        };
+
+        const debateSpeak = async (si) => {
+          const seat = seats[si];
+          if (!seat || !topic) { setError(!topic ? "Set a debate topic" : ""); return; }
+          const cfg = getAgentConfig(seat);
+          if (!cfg.apiKey) { setError("Set API key for " + (PROVIDERS[cfg.baseUrl]?.label || "provider") + " in Settings"); return; }
+          setError(""); setLoading(true); setLoadingSeat(si);
+          const side = getSeatSide(seat, si);
+          const sys = debateSysPrompt(seat, si, side, debateRound, debateScoreRef.current, debateHistoryRef.current);
+          const conv = debateConvMsgs();
+          const temp = seat.temperature !== undefined ? seat.temperature : DEFAULT_TEMP;
+          const msg = { seatIndex: si, name: seat.name, text: "", isUser: false, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
+          addMessage(msg);
+          try {
+            await callAPIStream(cfg.apiKey, cfg.baseUrl, cfg.model, sys, conv, LENGTHS[answerLength].tokens, temp, updateLastMessage);
+          } catch (e) {
+            try {
+              const text = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model, sys, conv, LENGTHS[answerLength].tokens, temp);
+              updateLastMessage(text);
+            } catch (e2) { undoMessage(); setError("API Error: " + e2.message); }
+          }
+          setLoading(false); setLoadingSeat(null);
+          scoreDebate(); // fire-and-forget — score bar updates in background
+          // Auto-update context every 3 manual messages
+          const nonSysMsgCount = msgsRef.current.filter(m => !m.isSystem).length;
+          if (nonSysMsgCount > 0 && nonSysMsgCount % 3 === 0) updateDebateContext(debateRound);
         };
 
         const debateRoundAuto = async () => {
