@@ -506,7 +506,19 @@
       // ═══════════════════════════════════════════
       // SHARED FUNCTIONS
       // ═══════════════════════════════════════════
-      const occupied = seats.map((s, i) => (s ? { ...s, idx: i } : null)).filter(Boolean);
+      // Interleave left (0-5) and right (6-11) columns for alternating speaking order
+      const occupied = (() => {
+        if (simMode !== "debate") return seats.map((s, i) => (s ? { ...s, idx: i } : null)).filter(Boolean);
+        const left = [], right = [];
+        seats.forEach((s, i) => { if (s) { if (i < 6) left.push({ ...s, idx: i }); else right.push({ ...s, idx: i }); } });
+        const result = [];
+        const max = Math.max(left.length, right.length);
+        for (let i = 0; i < max; i++) {
+          if (i < left.length) result.push(left[i]);
+          if (i < right.length) result.push(right[i]);
+        }
+        return result;
+      })();
       const th = TABLE_THEMES[tableTheme];
       const currentAgendaItem = activeAgendaIdx >= 0 && agenda[activeAgendaIdx] ? agenda[activeAgendaIdx].text : null;
 
