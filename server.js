@@ -55,12 +55,22 @@ const requestHandler = async (req, res) => {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
+  // ── Allowed API domains (SSRF whitelist) ──
+  const ALLOWED_API_DOMAINS = ["api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com"];
+  function checkDomain(url) {
+    try {
+      const h = new URL(url).hostname;
+      return ALLOWED_API_DOMAINS.some(d => h === d || h.endsWith("." + d));
+    } catch { return false; }
+  }
+
   // ── API Proxy (non-streaming) ──
   if (req.method === "POST" && req.url === "/api/proxy") {
     let body;
     try { body = await readBody(req); } catch (e) { json(res, 413, { error: { message: e.message } }); return; }
     try {
       const { url, headers, body: payload } = JSON.parse(body);
+      if (!checkDomain(url)) { json(res, 403, { error: { message: "API domain not permitted" } }); return; }
       const apiUrl = new URL(url);
       const proto = apiUrl.protocol === "https:" ? require("https") : require("http");
       const apiReq = proto.request({
@@ -83,6 +93,7 @@ const requestHandler = async (req, res) => {
     try { body = await readBody(req); } catch (e) { json(res, 413, { error: { message: e.message } }); return; }
     try {
       const { url, headers, body: payload } = JSON.parse(body);
+      if (!checkDomain(url)) { json(res, 403, { error: { message: "API domain not permitted" } }); return; }
       payload.stream = true;
       const apiUrl = new URL(url);
       const proto = apiUrl.protocol === "https:" ? require("https") : require("http");
@@ -177,6 +188,13 @@ const requestHandler = async (req, res) => {
             messageCount: (d.state?.messages || []).length,
             topic: d.state?.topic || "",
             context: (d.state?.context || "").slice(0, 150),
+            simMode: d.state?.simMode || "meeting",
+            debateScore: d.state?.debateScore ?? null,
+            debateScoreCount: (d.state?.debateScoreHistory || []).length,
+            debateRound: d.state?.debateRound || 0,
+            finished: d.state?.finished || false,
+            scoreHistory: (d.state?.debateScoreHistory || []).map(h => ({ r: h.round, s: h.score })),
+            summaryPreview: (d.state?.debateSummary || "").split(/[.!?]/)[0].trim().slice(0, 160),
           };
         } catch { return null; }
       }).filter(Boolean).sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));

@@ -3,11 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Conversation Simulator</title>
+  <title>AI Agents Debate</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.2/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
   <style>
     @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes fadeInFast { from { opacity: 0; } to { opacity: 1; } }
@@ -19,6 +21,19 @@
     body { margin: 0; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }
     input[type=range] { -webkit-appearance: none; appearance: none; height: 6px; background: #334155; border-radius: 3px; outline: none; }
     input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #10b981; cursor: pointer; border: 2px solid #0f172a; }
+    .md-body table { width: 100%; border-collapse: collapse; font-size: 0.75rem; margin: 0.75rem 0; }
+    .md-body th { background: rgba(51,65,85,0.6); padding: 6px 10px; text-align: left; font-weight: 600; color: #cbd5e1; border: 1px solid rgba(71,85,105,0.5); }
+    .md-body td { padding: 5px 10px; border: 1px solid rgba(71,85,105,0.4); color: #cbd5e1; vertical-align: top; }
+    .md-body tr:hover td { background: rgba(51,65,85,0.2); }
+    .md-body h2 { color: #fbbf24; font-size: 0.95rem; font-weight: 700; margin: 1.2rem 0 0.5rem; border-bottom: 1px solid rgba(71,85,105,0.5); padding-bottom: 4px; }
+    .md-body h3 { color: #e2e8f0; font-size: 0.85rem; font-weight: 600; margin: 0.8rem 0 0.3rem; }
+    .md-body p { color: #cbd5e1; line-height: 1.6; margin: 0.4rem 0; }
+    .md-body ul, .md-body ol { padding-left: 1.2rem; color: #cbd5e1; }
+    .md-body li { margin: 0.2rem 0; }
+    .md-body strong { color: #f1f5f9; }
+    .md-body em { color: #94a3b8; }
+    .md-body blockquote { border-left: 2px solid rgba(251,191,36,0.4); padding-left: 0.75rem; color: #94a3b8; font-style: italic; margin: 0.5rem 0; }
+    .md-body hr { border: none; border-top: 1px solid rgba(71,85,105,0.4); margin: 0.75rem 0; }
   </style>
 </head>
 <body>
@@ -49,10 +64,10 @@
       "https://api.openai.com/v1": {
         label: "OpenAI",
         models: [
-          { value: "gpt-5-mini", label: "GPT-5 Mini (fast)" },
-          { value: "gpt-5.4", label: "GPT-5.4 (flagship)" },
-          { value: "gpt-5.4-pro", label: "GPT-5.4 Pro" },
-        ], default: "gpt-5-mini",
+          { value: "gpt-5.4-mini", label: "GPT-5.4 Mini (fast)" },
+          { value: "gpt-5.4", label: "GPT-5.4 (balanced)" },
+          { value: "gpt-5.4-pro", label: "GPT-5.4 Pro (flagship)" },
+        ], default: "gpt-5.4-mini",
       },
       "https://api.anthropic.com/v1": {
         label: "Anthropic",
@@ -150,7 +165,11 @@
       const apiHeaders = buildHeaders(apiKey, baseUrl);
       const proxyRes = await fetch("/api/proxy", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: apiUrl, headers: apiHeaders, body: payload }) });
-      if (!proxyRes.ok) throw new Error("Proxy request failed (status " + proxyRes.status + ")");
+      if (!proxyRes.ok) {
+        const errBody = await proxyRes.json().catch(() => null);
+        const errMsg = errBody?.error?.message || errBody?.message || ("API error " + proxyRes.status);
+        throw new Error(errMsg);
+      }
       const d = await proxyRes.json(); return extractContent(baseUrl, d);
     }
 
@@ -253,6 +272,7 @@
       const [conversations, setConversations] = useState([]);
       const [convSearch, setConvSearch] = useState("");
       const [confirmDeleteFile, setConfirmDeleteFile] = useState(null);
+      const [historyFilter, setHistoryFilter] = useState("all");
       // Current meeting state
       const [seats, setSeats] = useState(Array(6).fill(null));
       const [messages, setMessages] = useState([]);
@@ -274,9 +294,17 @@
       const [debateRound, setDebateRound] = useState(0);
       const [debateTotalRounds, setDebateTotalRounds] = useState(3);
       const [debateRunning, setDebateRunning] = useState(false);
-      const [debateFinished, setDebateFinished] = useState(false);
+      const [debateFinished, setDebateFinished] = useState(false); // summary modal open
+      const [debateIsFinished, setDebateIsFinished] = useState(false); // permanent concluded flag
       const [debateSummary, setDebateSummary] = useState("");
       const [debateStats, setDebateStats] = useState({});
+      const [generatingSummary, setGeneratingSummary] = useState(false);
+      const [scoringInProgress, setScoringInProgress] = useState(false);
+      // Debate persona suggestions
+      const [personaSuggestions, setPersonaSuggestions] = useState([]);
+      const [selectedSuggestions, setSelectedSuggestions] = useState(new Set());
+      const [generatingSuggestions, setGeneratingSuggestions] = useState(false);
+      const [showSuggestions, setShowSuggestions] = useState(false);
       // UI
       const [loading, setLoading] = useState(false);
       const [loadingSeat, setLoadingSeat] = useState(null);
@@ -301,9 +329,15 @@
       const autosaveTimer = useRef(null);
       const chatRef = useRef(null);
       const undoStack = useRef([]);
+      const debateRunningRef = useRef(false);
+      const scoringRef = useRef(false);
+      const debateScoreRef = useRef(50);
+      const debateHistoryRef = useRef([]);
       const [canUndo, setCanUndo] = useState(false);
 
       useEffect(() => { msgsRef.current = messages; }, [messages]);
+      useEffect(() => { debateScoreRef.current = debateScore; }, [debateScore]);
+      useEffect(() => { debateHistoryRef.current = debateScoreHistory; }, [debateScoreHistory]);
       useEffect(() => { if (chatRef.current) chatRef.current.scrollTo({ top: chatRef.current.scrollHeight, behavior: "smooth" }); }, [messages]);
 
       // ── Load settings + personas + autosave on startup ──
@@ -382,6 +416,10 @@
         if (s.debateScoreHistory) setDebateScoreHistory(s.debateScoreHistory);
         if (s.debateRound !== undefined) setDebateRound(s.debateRound);
         if (s.debateTotalRounds !== undefined) setDebateTotalRounds(s.debateTotalRounds);
+        setDebateIsFinished(s.finished || false);
+        if (s.debateSummary) setDebateSummary(s.debateSummary);
+        if (s.debateStats) setDebateStats(s.debateStats);
+        if (s.finished && s.debateSummary) setDebateFinished(true); // re-open summary modal
         undoStack.current = []; setCanUndo(false);
       };
       const loadConversation = async (filename) => {
@@ -390,8 +428,8 @@
           if (r.ok) { const d = await r.json(); loadState(d.state); setCurrentSaveName(d.name || ""); setShowExportMenu(false); setPage(d.state.simMode === "debate" ? "debate" : "meeting"); }
         } catch (e) { setError("Load failed: " + e.message); }
       };
-      const saveConversation = async (name) => {
-        const state = { seats, messages: msgsRef.current, topic, tableTheme, agenda, activeAgendaIdx, context, simMode, debateFormat, debateSide, debateScore, debateScoreHistory, debateRound, debateTotalRounds };
+      const saveConversation = async (name, extraState = {}) => {
+        const state = { seats, messages: msgsRef.current, topic, tableTheme, agenda, activeAgendaIdx, context, simMode, debateFormat, debateSide, debateScore, debateScoreHistory, debateRound, debateTotalRounds, finished: debateIsFinished, debateSummary, debateStats, ...extraState };
         await fetch("/api/saves", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, state }) });
         setCurrentSaveName(name); refreshConversations();
       };
@@ -402,17 +440,18 @@
 
       // ── Autosave ──
       const triggerAutosave = () => {
+        if (debateIsFinished) return; // concluded debates are already saved
         if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
         autosaveTimer.current = setTimeout(async () => {
           try {
-            const autosaveState = { seats, messages: msgsRef.current, topic, tableTheme, agenda, activeAgendaIdx, context, simMode, debateFormat, debateSide, debateScore, debateScoreHistory, debateRound, debateTotalRounds };
+            const autosaveState = { seats, messages: msgsRef.current, topic, tableTheme, agenda, activeAgendaIdx, context, simMode, debateFormat, debateSide, debateScore, debateScoreHistory, debateRound, debateTotalRounds, finished: debateIsFinished, debateSummary, debateStats };
             await fetch("/api/autosave", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(autosaveState) });
           } catch (_) {}
         }, 3000);
       };
       useEffect(() => { if ((page === "meeting" || page === "debate") && settingsLoaded) triggerAutosave(); }, [seats, messages, topic, tableTheme, agenda, activeAgendaIdx, context, simMode, debateScore, debateRound]);
 
-      const recoverAutosave = () => { if (!recoveryData?.state) return; loadState(recoveryData.state); setShowRecovery(false); setPage(recoveryData.state.simMode === "debate" ? "debate" : "meeting"); };
+      const recoverAutosave = () => { if (!recoveryData?.state) return; loadState(recoveryData.state); setShowRecovery(false); setPage(recoveryData.state.finished ? "home" : (recoveryData.state.simMode === "debate" ? "debate" : "meeting")); };
 
       // ── New meeting ──
       const startNew = () => {
@@ -430,8 +469,12 @@
         setTopic(""); setTableTheme("brown"); setCurrentSaveName(""); setError("");
         setAgenda([]); setActiveAgendaIdx(-1); setAgendaInput("");
         setContext(""); setShowContext(false); undoStack.current = []; setCanUndo(false);
-        setShowExportMenu(false); setSimMode("debate"); setDebateFinished(false); setDebateRound(0);
-        setDebateScore(50); setDebateScoreHistory([]); setDebateSummary(""); setDebateTotalRounds(5);
+        setShowExportMenu(false); setSimMode("debate"); setDebateFormat("sides"); setDebateSide({});
+        setDebateFinished(false); setDebateIsFinished(false); setDebateRound(0);
+        setDebateScore(50); setDebateScoreHistory([]); setDebateSummary(""); setDebateStats({});
+        setDebateTotalRounds(5); setDebateRunning(false); debateRunningRef.current = false;
+        setShowSuggestions(false); setPersonaSuggestions([]); setSelectedSuggestions(new Set());
+        setGeneratingSuggestions(false);
         setPage("debate-setup");
       };
 
@@ -654,9 +697,9 @@
         return (
           <div className="h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 text-slate-100 anim-fade">
             <div className="text-center mb-12">
-              <div className="flex items-center justify-center gap-3 mb-3"><IcoMsg size={40} className="text-emerald-400" /></div>
-              <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">AI Conversation Simulator</h1>
-              <p className="text-slate-500 text-sm">Configure personas, simulate meetings, generate insights</p>
+              <div className="flex items-center justify-center gap-3 mb-3"><IcoSparkles size={40} className="text-amber-400" /></div>
+              <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-amber-400 to-emerald-400 bg-clip-text text-transparent">AI Agents Debate</h1>
+              <p className="text-slate-500 text-sm">Configure personas, run debates, generate insights</p>
             </div>
             {showRecovery && recoveryData && (
               <div className="mb-6 w-80 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25 anim-fade">
@@ -672,17 +715,13 @@
               </div>
             )}
             <div className="flex flex-col gap-3 w-72">
-              <button onClick={startNew} className="flex items-center gap-3 px-6 py-4 rounded-2xl bg-emerald-600/90 hover:bg-emerald-500 transition-all text-left group glow">
-                <IcoPlay size={22} className="group-hover:scale-110 transition-transform" />
-                <div><div className="font-semibold">New Simulation</div><div className="text-xs text-emerald-200/60">Start a fresh conversation</div></div>
-              </button>
-              <button onClick={startNewDebate} className="flex items-center gap-3 px-6 py-4 rounded-2xl bg-amber-600/90 hover:bg-amber-500 transition-all text-left group">
+              <button onClick={startNewDebate} className="flex items-center gap-3 px-6 py-4 rounded-2xl bg-amber-600/90 hover:bg-amber-500 transition-all text-left group glow">
                 <IcoSparkles size={22} className="group-hover:scale-110 transition-transform" />
-                <div><div className="font-semibold">New Debate</div><div className="text-xs text-amber-200/60">Run a debate battle</div></div>
+                <div><div className="font-semibold">New Debate</div><div className="text-xs text-amber-200/60">Run an AI-powered debate battle</div></div>
               </button>
               <button onClick={() => { refreshConversations(); setPage("conversations"); }} className="flex items-center gap-3 px-6 py-4 rounded-2xl bg-slate-700/60 hover:bg-slate-700 transition-all text-left group">
                 <IcoFolder size={22} className="text-blue-400 group-hover:scale-110 transition-transform" />
-                <div><div className="font-semibold">Load Simulation</div><div className="text-xs text-slate-400">Continue a saved meeting</div></div>
+                <div><div className="font-semibold">Debate History</div><div className="text-xs text-slate-400">Load a saved debate or meeting</div></div>
               </button>
               <button onClick={() => { refreshPersonas(); setPage("settings"); }} className="flex items-center gap-3 px-6 py-4 rounded-2xl bg-slate-700/60 hover:bg-slate-700 transition-all text-left group">
                 <IcoSettings size={22} className="text-amber-400 group-hover:scale-110 transition-transform" />
@@ -692,7 +731,7 @@
                 <IcoX size={22} className="group-hover:scale-110 transition-transform" /><div><div className="font-semibold">Exit</div></div>
               </button>
             </div>
-            <div className="mt-8 text-[10px] text-slate-700">v2.0 — Your API key stays local</div>
+            <div className="mt-8 text-[10px] text-slate-700">v2.1 — Your API keys stay local</div>
           </div>
         );
       }
@@ -783,7 +822,7 @@
                     <div><label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Title / Role</label>
                       <input type="text" value={editPersonaForm.title} onChange={e => setEditPersonaForm(f => ({...f, title: e.target.value}))} className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-emerald-500/30" /></div>
                     <div><label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Instructions</label>
-                      <textarea value={editPersonaForm.instructions} onChange={e => setEditPersonaForm(f => ({...f, instructions: e.target.value}))} rows={4} className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none resize-none focus:ring-1 focus:ring-emerald-500/30" /></div>
+                      <textarea value={editPersonaForm.instructions} onChange={e => setEditPersonaForm(f => ({...f, instructions: e.target.value}))} rows={10} className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none resize-y focus:ring-1 focus:ring-emerald-500/30 min-h-[160px] max-h-[400px]" /></div>
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className="text-[10px] text-slate-500 uppercase tracking-wider">Temperature</label>
@@ -805,63 +844,212 @@
       }
 
       // ═══════════════════════════════════════════
-      // CONVERSATIONS PAGE (with search + delete confirm)
+      // HISTORY PAGE (Debates + Meetings, tabbed)
       // ═══════════════════════════════════════════
       if (page === "conversations") {
-        const filtered = convSearch.trim() ? conversations.filter(c =>
-          (c.name || "").toLowerCase().includes(convSearch.toLowerCase()) ||
-          (c.topic || "").toLowerCase().includes(convSearch.toLowerCase()) ||
-          (c.context || "").toLowerCase().includes(convSearch.toLowerCase())
-        ) : conversations;
+        // Helpers
+        const relTime = (iso) => {
+          const s = (Date.now() - new Date(iso)) / 1000;
+          if (s < 60) return "just now";
+          if (s < 3600) return Math.round(s / 60) + "m ago";
+          if (s < 86400) return Math.round(s / 3600) + "h ago";
+          if (s < 604800) return Math.round(s / 86400) + "d ago";
+          return new Date(iso).toLocaleDateString();
+        };
+        const Sparkline = ({ data, w = 80, h = 22 }) => {
+          if (!data || data.length < 2) return (
+            <svg width={w} height={h}><line x1="0" y1={h/2} x2={w} y2={h/2} stroke="#475569" strokeWidth="1" strokeDasharray="3,2"/></svg>
+          );
+          const vals = data.map(d => d.s !== undefined ? d.s : 50);
+          const pts = vals.map((v, i) => ((i / (vals.length - 1)) * w).toFixed(1) + "," + (h - (v / 100) * h).toFixed(1)).join(" ");
+          const last = vals[vals.length - 1];
+          const col = last > 55 ? "#22c55e" : last < 45 ? "#ef4444" : "#94a3b8";
+          return (
+            <svg width={w} height={h} style={{ overflow: "visible" }}>
+              <line x1="0" y1={h/2} x2={w} y2={h/2} stroke="#334155" strokeWidth="0.5" strokeDasharray="2,2"/>
+              <polyline points={pts} fill="none" stroke={col} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
+              <circle cx={parseFloat(pts.split(" ").pop().split(",")[0])} cy={parseFloat(pts.split(" ").pop().split(",")[1])} r="2.5" fill={col}/>
+            </svg>
+          );
+        };
+        const getVerdict = (c) => {
+          if (!c.debateScore && c.debateScore !== 0) return null;
+          const s = c.debateScore;
+          if (s > 55) return { label: "YES won", color: "#22c55e", bg: "rgba(34,197,94,0.12)" };
+          if (s < 45) return { label: "NO won", color: "#ef4444", bg: "rgba(239,68,68,0.12)" };
+          return { label: "Draw", color: "#94a3b8", bg: "rgba(148,163,184,0.12)" };
+        };
+
+        // Filter logic
+        const debates = conversations.filter(c => c.simMode === "debate");
+        const meetings = conversations.filter(c => c.simMode !== "debate");
+        const completed = debates.filter(c => c.finished);
+        const inProgress = debates.filter(c => !c.finished && c.messageCount > 0);
+
+        let tabItems = conversations;
+        if (historyFilter === "debates") tabItems = debates;
+        else if (historyFilter === "meetings") tabItems = meetings;
+        else if (historyFilter === "completed") tabItems = completed;
+        else if (historyFilter === "in-progress") tabItems = inProgress;
+
+        const searchFiltered = convSearch.trim()
+          ? tabItems.filter(c =>
+              (c.name || "").toLowerCase().includes(convSearch.toLowerCase()) ||
+              (c.topic || "").toLowerCase().includes(convSearch.toLowerCase()))
+          : tabItems;
+
+        // Stats for debates
+        const avgScore = debates.length > 0
+          ? Math.round(debates.filter(c => c.debateScore != null).reduce((a, c) => a + c.debateScore, 0) / Math.max(1, debates.filter(c => c.debateScore != null).length))
+          : 50;
+        const forWins = completed.filter(c => c.debateScore > 55).length;
+
+        const TABS = [
+          { id: "all",         label: "All",        count: conversations.length },
+          { id: "debates",     label: "Debates",    count: debates.length },
+          { id: "completed",   label: "Completed",  count: completed.length },
+          { id: "in-progress", label: "In Progress", count: inProgress.length },
+          { id: "meetings",    label: "Meetings",   count: meetings.length },
+        ];
+
         return (
           <div className="h-screen flex flex-col bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100 anim-fade">
-            <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-700/40">
-              <button onClick={() => { setPage("home"); setConvSearch(""); setConfirmDeleteFile(null); }} className="p-2 rounded-lg hover:bg-slate-700/60 transition-colors"><IcoArrow size={18} /></button>
-              <div className="flex-1 flex items-center gap-2 bg-slate-700/40 rounded-lg px-3 py-1.5">
-                <IcoSearch size={14} className="text-slate-500 flex-shrink-0" />
-                <input type="text" value={convSearch} onChange={e => setConvSearch(e.target.value)} placeholder="Search conversations..." className="bg-transparent text-sm outline-none flex-1 placeholder-slate-500" />
+            {/* Header */}
+            <div className="flex items-center gap-3 px-5 py-3.5 border-b border-slate-700/40 flex-shrink-0">
+              <button onClick={() => { setPage("home"); setConvSearch(""); setConfirmDeleteFile(null); }} className="p-1.5 rounded-lg hover:bg-slate-700/60 transition-colors flex-shrink-0"><IcoArrow size={16} /></button>
+              <div className="flex items-center gap-2 bg-slate-700/40 rounded-lg px-2.5 py-1.5 flex-1">
+                <IcoSearch size={13} className="text-slate-500 flex-shrink-0" />
+                <input type="text" value={convSearch} onChange={e => setConvSearch(e.target.value)} placeholder="Search…" className="bg-transparent text-sm outline-none flex-1 placeholder-slate-500 min-w-0" />
                 {convSearch && <button onClick={() => setConvSearch("")} className="text-slate-500"><IcoX size={12} /></button>}
               </div>
-              <button onClick={startNew} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold transition-colors flex-shrink-0">
-                <IcoPlus size={15} /> New
+              <button onClick={startNewDebate} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600/80 hover:bg-amber-500 text-xs font-semibold transition-colors flex-shrink-0">
+                <IcoSparkles size={13} /> New Debate
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-6 max-w-2xl mx-auto w-full">
-              {filtered.length === 0 ? (
-                <div className="text-center py-20">
-                  <IcoMsg size={40} className="mx-auto text-slate-700 mb-3" />
-                  <div className="text-slate-500 mb-4">{convSearch ? "No conversations match your search" : "No saved conversations yet"}</div>
-                  {!convSearch && <button onClick={startNew} className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold transition-colors">Start your first simulation</button>}
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {filtered.map(c => (
-                    <div key={c.filename} className="flex items-center gap-4 p-4 rounded-2xl bg-slate-800/50 hover:bg-slate-800/80 transition-colors cursor-pointer group"
-                      onClick={() => loadConversation(c.filename)}>
-                      <div className="w-12 h-12 rounded-xl bg-emerald-600/20 flex items-center justify-center flex-shrink-0"><IcoMsg size={22} className="text-emerald-400" /></div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-semibold truncate">{c.name}</div>
-                        <div className="text-xs text-slate-500 truncate mt-0.5">
-                          {c.topic && <span className="mr-3">{c.topic}</span>}
-                          {c.participantCount} participant{c.participantCount !== 1 ? "s" : ""} · {c.messageCount} message{c.messageCount !== 1 ? "s" : ""}
-                        </div>
-                        {c.context && <div className="text-[11px] text-cyan-400/50 truncate mt-0.5 flex items-center gap-1"><IcoBook size={10} /> {c.context}</div>}
-                        <div className="text-[10px] text-slate-600 mt-0.5">{new Date(c.savedAt).toLocaleString()}</div>
+
+            {/* Tabs */}
+            <div className="flex items-center gap-0.5 px-5 pt-3 pb-0 flex-shrink-0 border-b border-slate-700/30">
+              {TABS.map(tab => (
+                <button key={tab.id} onClick={() => setHistoryFilter(tab.id)}
+                  className={"px-3 py-1.5 text-xs font-semibold rounded-t-lg transition-colors border-b-2 " +
+                    (historyFilter === tab.id
+                      ? "border-amber-500 text-amber-300 bg-amber-500/10"
+                      : "border-transparent text-slate-500 hover:text-slate-300")}>
+                  {tab.label} <span className={"ml-1 text-[10px] px-1.5 py-0.5 rounded-full " + (historyFilter === tab.id ? "bg-amber-500/30 text-amber-200" : "bg-slate-700/60 text-slate-500")}>{tab.count}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              <div className="max-w-3xl mx-auto w-full px-5 pt-4 pb-6">
+
+                {/* Debates stats summary (shown for all/debates/completed tabs) */}
+                {(historyFilter === "all" || historyFilter === "debates" || historyFilter === "completed") && debates.length > 0 && (
+                  <div className="grid grid-cols-4 gap-2.5 mb-5">
+                    {[
+                      { v: debates.length, label: "Debates", color: "text-amber-300" },
+                      { v: completed.length, label: "Completed", color: "text-emerald-300" },
+                      { v: completed.length > 0 ? forWins + "W / " + (completed.length - forWins - completed.filter(c => c.debateScore >= 45 && c.debateScore <= 55).length) + "L" : "—", label: "YES / NO Wins", color: "text-slate-200" },
+                      { v: debates.filter(c => c.debateScore != null).length > 0 ? avgScore + "/100" : "—", label: "Avg Score", color: "text-slate-200" },
+                    ].map((s, i) => (
+                      <div key={i} className="bg-slate-800/50 rounded-xl p-3 text-center border border-slate-700/30">
+                        <div className={"text-xl font-bold " + s.color}>{s.v}</div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">{s.label}</div>
                       </div>
-                      {confirmDeleteFile === c.filename ? (
-                        <div className="flex items-center gap-1.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
-                          <span className="text-[10px] text-red-400">Delete?</span>
-                          <button onClick={() => deleteConversation(c.filename)} className="px-2 py-1 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 text-xs font-semibold">Yes</button>
-                          <button onClick={() => setConfirmDeleteFile(null)} className="px-2 py-1 rounded-lg bg-slate-700 text-slate-400 hover:bg-slate-600 text-xs">No</button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Cards */}
+                {searchFiltered.length === 0 ? (
+                  <div className="text-center py-20">
+                    <IcoMsg size={38} className="mx-auto text-slate-700 mb-3" />
+                    <div className="text-slate-500">{convSearch ? ('No results matching "' + convSearch + '"') : "Nothing here yet"}</div>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {searchFiltered.map(c => {
+                      const isDebate = c.simMode === "debate";
+                      const verdict = isDebate ? getVerdict(c) : null;
+                      const accentColor = isDebate
+                        ? (c.finished ? (c.debateScore > 55 ? "#22c55e" : c.debateScore < 45 ? "#ef4444" : "#94a3b8") : "#f59e0b")
+                        : "#10b981";
+                      return (
+                        <div key={c.filename}
+                          className="flex gap-0 rounded-2xl bg-slate-800/50 hover:bg-slate-800/80 transition-all cursor-pointer group overflow-hidden border border-slate-700/30 hover:border-slate-600/50"
+                          onClick={() => loadConversation(c.filename)}>
+                          {/* Left color accent strip */}
+                          <div className="w-1 flex-shrink-0" style={{ backgroundColor: accentColor + "88" }} />
+                          <div className="flex-1 flex items-start gap-3 p-3.5 min-w-0">
+                            {/* Icon */}
+                            <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
+                              style={{ backgroundColor: accentColor + "1a" }}>
+                              {isDebate ? <IcoSparkles size={18} style={{ color: accentColor }} /> : <IcoMsg size={18} style={{ color: accentColor }} />}
+                            </div>
+                            {/* Main content */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                                <span className="font-semibold text-slate-100 truncate">{c.name}</span>
+                                {isDebate && (
+                                  c.finished ? (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold flex-shrink-0 flex items-center gap-0.5"
+                                      style={{ color: verdict?.color, backgroundColor: verdict?.bg }}>
+                                      ✓ {verdict?.label} {c.debateScore != null ? "(" + c.debateScore + "%)" : ""}
+                                    </span>
+                                  ) : c.messageCount > 0 ? (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 font-medium flex-shrink-0">⟳ In Progress</span>
+                                  ) : (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-700/60 text-slate-500 flex-shrink-0">Setup</span>
+                                  )
+                                )}
+                              </div>
+                              {c.topic && <div className="text-xs text-slate-400 truncate mb-1">{c.topic}</div>}
+                              {c.summaryPreview && c.finished && <div className="text-[11px] text-slate-500 italic truncate mb-1">{c.summaryPreview}</div>}
+                              <div className="flex items-center gap-3 text-[10px] text-slate-600 flex-wrap">
+                                <span>{c.participantCount} agents</span>
+                                <span>{c.messageCount} msg{c.messageCount !== 1 ? "s" : ""}</span>
+                                {isDebate && c.debateRound > 0 && <span>{c.debateRound} round{c.debateRound !== 1 ? "s" : ""}</span>}
+                                <span className="text-slate-700">{relTime(c.savedAt)}</span>
+                              </div>
+                            </div>
+                            {/* Right side: sparkline + mini score bar */}
+                            {isDebate && (
+                              <div className="flex flex-col items-end gap-1.5 flex-shrink-0 ml-2">
+                                {c.scoreHistory && c.scoreHistory.length >= 2 && (
+                                  <Sparkline data={c.scoreHistory} w={72} h={22} />
+                                )}
+                                {c.debateScore != null && c.debateScoreCount > 0 && (
+                                  <div className="w-[72px] h-2 rounded-full overflow-hidden bg-slate-700/50">
+                                    <div className="h-full rounded-full transition-all duration-500"
+                                      style={{
+                                        width: c.debateScore + "%",
+                                        backgroundColor: c.debateScore > 55 ? "#22c55e" : c.debateScore < 45 ? "#ef4444" : "#94a3b8"
+                                      }} />
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          {/* Delete button */}
+                          <div className="flex items-center pr-2 flex-shrink-0" onClick={e => e.stopPropagation()}>
+                            {confirmDeleteFile === c.filename ? (
+                              <div className="flex items-center gap-1">
+                                <button onClick={() => deleteConversation(c.filename)} className="px-2 py-1 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 text-xs font-semibold">Yes</button>
+                                <button onClick={() => setConfirmDeleteFile(null)} className="px-2 py-1 rounded-lg bg-slate-700 text-slate-400 hover:bg-slate-600 text-xs">No</button>
+                              </div>
+                            ) : (
+                              <button onClick={e => { e.stopPropagation(); setConfirmDeleteFile(c.filename); }}
+                                className="p-1.5 rounded-lg text-slate-700 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all">
+                                <IcoTrash size={14} />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      ) : (
-                        <button onClick={e => { e.stopPropagation(); setConfirmDeleteFile(c.filename); }}
-                          className="p-2 rounded-lg text-slate-600 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0"><IcoTrash size={16} /></button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         );
@@ -871,6 +1059,89 @@
       // DEBATE SETUP PAGE
       // ═══════════════════════════════════════════
       if (page === "debate-setup") {
+        const generatePersonaSuggestions = async () => {
+          const cfg = getAgentConfig(null);
+          if (!cfg.apiKey) { setError("Set API key in Settings first"); return; }
+          if (!topic.trim()) { setError("Enter a topic first"); return; }
+          setError(""); setGeneratingSuggestions(true);
+          try {
+            const isSides = debateFormat === "sides";
+            const prompt = `You are casting the ideal 12-person debate panel for: "${topic.trim()}"
+
+Return a JSON array of EXACTLY 12 personas — the most interesting, diverse, high-contrast panel possible.
+${isSides ? "Balance: 4 FOR + 4 AGAINST + 2 NEUTRAL + 2 WILDCARD/SPECIALIST." : "Balance: 12 diverse perspectives covering the full spectrum of opinion, background, and style."}
+
+IMPORTANT: Where relevant, cast REAL well-known public figures (politicians, CEOs, academics, activists, authors, journalists) who are known to have strong views on this topic or adjacent topics. For real people, provide their Wikipedia URL and a direct image URL. For fictional archetypes, set those fields to null.
+
+For each persona write COMPREHENSIVE, RICH instructions — 4 detailed paragraphs:
+1. WHO they are: full background, career history, life experience, personality, and what shaped their worldview
+2. HOW they argue: rhetorical style, emotional register, logic patterns, typical tactics, verbal tics, what triggers them
+3. WHAT they specifically believe about "${topic.trim()}" and WHY — their core position, their key evidence, their emotional stake
+4. Their BLIND SPOTS and WEAKNESSES: where their argument breaks down, what they refuse to acknowledge, biases they can't see
+
+JSON format — output ONLY the array, no markdown:
+[{"name":"...","title":"...","instructions":"...","side":"for"|"against"|"neutral","archetype":"...","profileUrl":"https://en.wikipedia.org/wiki/Name or null","imageUrl":"direct image URL or null"},...]
+
+Return the array starting with [ and ending with ]. Nothing else.`;
+
+            const result = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model,
+              "Return only a valid JSON array. No markdown code blocks. No explanation. Start with [ and end with ].",
+              [{ role: "user", content: prompt }], 8000, 0.85);
+
+            let arr;
+            // Multiple parse strategies
+            try {
+              // Strategy 1: direct parse after stripping markdown fences
+              const cleaned = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+              arr = JSON.parse(cleaned);
+            } catch (_) {
+              try {
+                // Strategy 2: extract first [...] block (handles extra text around it)
+                const match = result.match(/\[[\s\S]*\]/);
+                if (!match) throw new Error("no array found");
+                arr = JSON.parse(match[0]);
+              } catch (_2) {
+                // Strategy 3: try to fix common issues (trailing commas, single quotes)
+                const match2 = result.match(/\[[\s\S]*\]/);
+                if (!match2) throw new Error("Response did not contain a JSON array. Try again.");
+                const fixed = match2[0]
+                  .replace(/,\s*([}\]])/g, "$1")   // remove trailing commas
+                  .replace(/'/g, '"');              // single to double quotes
+                arr = JSON.parse(fixed);
+              }
+            }
+            if (!Array.isArray(arr) || arr.length === 0) throw new Error("Expected a non-empty array");
+            // Ensure each entry has required fields
+            const clean = arr.filter(p => p && p.name && p.title && p.instructions).slice(0, 12);
+            if (clean.length === 0) throw new Error("Personas missing required fields");
+            setPersonaSuggestions(clean);
+            setSelectedSuggestions(new Set(clean.map((_, i) => i)));
+            setShowSuggestions(true);
+          } catch (e) { setError("Suggestion error: " + e.message); }
+          setGeneratingSuggestions(false);
+        };
+
+        const addSelectedPersonas = () => {
+          const toAdd = personaSuggestions.filter((_, i) => selectedSuggestions.has(i)).slice(0, 12);
+          const newSeats = [...seats];
+          for (const p of toAdd) {
+            // Find best slot based on side
+            let slot = -1;
+            if (debateFormat === "sides") {
+              const range = p.side === "against" ? [6, 12] : [0, 6];
+              for (let i = range[0]; i < range[1]; i++) { if (!newSeats[i]) { slot = i; break; } }
+              if (slot === -1) { for (let i = 0; i < 12; i++) { if (!newSeats[i]) { slot = i; break; } } }
+            } else {
+              for (let i = 0; i < 12; i++) { if (!newSeats[i]) { slot = i; break; } }
+            }
+            if (slot === -1) break;
+            newSeats[slot] = { name: p.name, title: p.title, instructions: p.instructions, temperature: DEFAULT_TEMP, imageUrl: p.imageUrl || null, profileUrl: p.profileUrl || null, side: p.side || null };
+          }
+          setSeats(newSeats);
+          setShowSuggestions(false);
+          setPage("debate");
+        };
+
         return (
           <div className="h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 text-slate-100 anim-fade">
             <div className="text-center mb-8">
@@ -894,11 +1165,95 @@
                   </button>
                 </div>
               </div>
+              {error && <div className="text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2">{error}</div>}
+
+              {/* AI Persona Suggestions button */}
+              <button onClick={generatePersonaSuggestions} disabled={!topic.trim() || generatingSuggestions}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-purple-600/20 border border-purple-500/30 hover:bg-purple-600/30 disabled:opacity-30 transition-all text-sm font-semibold text-purple-300">
+                <IcoSparkles size={16} />
+                ✨ Suggest AI Personas for this topic
+              </button>
+
               <div className="flex gap-3">
                 <button onClick={() => setPage("home")} className="flex-1 px-6 py-3 rounded-2xl bg-slate-700/60 hover:bg-slate-700 transition-all">Cancel</button>
                 <button onClick={() => { if (!topic.trim()) return; setPage("debate"); }} disabled={!topic.trim()} className="flex-1 px-6 py-3 rounded-2xl bg-emerald-600/90 hover:bg-emerald-500 disabled:opacity-30 transition-all font-semibold">Start Debate</button>
               </div>
             </div>
+
+            {/* Generating personas overlay */}
+            {generatingSuggestions && (
+              <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 anim-fade-fast">
+                <div className="bg-slate-800 rounded-2xl p-8 flex flex-col items-center gap-4 border border-slate-700/50 shadow-2xl">
+                  <div className="w-12 h-12 rounded-full border-4 border-purple-500/30 border-t-purple-400 animate-spin" />
+                  <div className="font-bold text-lg text-purple-300">Generating personas…</div>
+                  <div className="text-xs text-slate-500">Casting the ideal 12-person debate panel for your topic…</div>
+                </div>
+              </div>
+            )}
+
+            {/* Persona selection modal */}
+            {showSuggestions && personaSuggestions.length > 0 && (
+              <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 anim-fade-fast p-4">
+                <div className="bg-slate-900 rounded-2xl border border-slate-700/50 shadow-2xl w-full max-w-3xl flex flex-col" style={{ maxHeight: "88vh" }}>
+                  {/* Modal header */}
+                  <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700/50 flex-shrink-0">
+                    <div>
+                      <h3 className="font-bold text-base text-slate-100">Choose Debate Personas</h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        <span className="text-emerald-400 font-semibold">{selectedSuggestions.size}</span> selected
+                        <span className="text-slate-600 mx-1.5">·</span>
+                        max 12 seats at the table
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => setSelectedSuggestions(new Set(personaSuggestions.map((_, i) => i)))} className="text-[11px] text-emerald-400 hover:text-emerald-300 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors">All</button>
+                      <button onClick={() => setSelectedSuggestions(new Set())} className="text-[11px] text-slate-400 hover:text-slate-300 px-2.5 py-1.5 rounded-lg bg-slate-700/50 hover:bg-slate-700 transition-colors">None</button>
+                      <button onClick={() => setShowSuggestions(false)} className="ml-1 p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-slate-700/60 transition-colors"><IcoX size={15} /></button>
+                    </div>
+                  </div>
+                  {/* Scrollable persona grid */}
+                  <div className="flex-1 overflow-y-auto p-4">
+                    <div className="grid grid-cols-2 gap-2">
+                      {personaSuggestions.map((p, i) => (
+                        <div key={i} onClick={() => setSelectedSuggestions(s => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; })}
+                          className={"flex gap-2.5 p-3 rounded-xl cursor-pointer transition-all border " + (selectedSuggestions.has(i) ? "bg-emerald-600/10 border-emerald-500/30" : "bg-slate-800/60 border-transparent hover:bg-slate-800 hover:border-slate-600/40")}>
+                          <div className={"flex-shrink-0 w-4 h-4 mt-0.5 rounded border-2 flex items-center justify-center " + (selectedSuggestions.has(i) ? "bg-emerald-500 border-emerald-500" : "border-slate-500")}>
+                            {selectedSuggestions.has(i) && <IcoCheck size={9} className="text-white" />}
+                          </div>
+                          {/* Avatar: real photo or colored initials */}
+                          <div className="flex-shrink-0 w-9 h-9 rounded-full overflow-hidden border border-slate-600/40 bg-slate-700">
+                            {p.imageUrl ? (
+                              <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" onError={e => { e.target.style.display="none"; e.target.nextSibling.style.display="flex"; }} />
+                            ) : null}
+                            <div className={"w-full h-full items-center justify-center text-[10px] font-bold text-white " + (p.imageUrl ? "hidden" : "flex")}
+                              style={{ backgroundColor: p.side === "for" ? "#16a34a" : p.side === "against" ? "#dc2626" : "#475569" }}>
+                              {p.name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase()}
+                            </div>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                              <span className="text-xs font-semibold">{p.name}</span>
+                              <span className={"text-[9px] px-1.5 py-0.5 rounded-full font-bold flex-shrink-0 " + (p.side === "for" ? "bg-green-500/20 text-green-400" : p.side === "against" ? "bg-red-500/20 text-red-400" : "bg-slate-600/50 text-slate-400")}>{p.side === "for" ? "FOR" : p.side === "against" ? "AGN" : "NEU"}</span>
+                              {p.profileUrl && <a href={p.profileUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-[9px] text-blue-400 hover:text-blue-300 flex-shrink-0" title="Wikipedia">↗</a>}
+                            </div>
+                            <div className="text-[10px] text-slate-400 font-medium mb-0.5 truncate">{p.title}</div>
+                            <div className="text-[10px] text-slate-500 leading-relaxed line-clamp-3">{p.instructions.slice(0,180)}…</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Sticky footer */}
+                  <div className="px-5 py-4 border-t border-slate-700/50 flex gap-3 flex-shrink-0 bg-slate-900/80">
+                    <button onClick={() => setShowSuggestions(false)} className="px-5 py-2.5 rounded-xl bg-slate-700/60 hover:bg-slate-700 transition-all text-sm">Cancel</button>
+                    <button onClick={addSelectedPersonas} disabled={selectedSuggestions.size === 0}
+                      className="flex-1 py-2.5 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 disabled:opacity-30 transition-all font-semibold text-sm">
+                      {selectedSuggestions.size === 0 ? "Select personas to add" : "Add " + Math.min(selectedSuggestions.size, 12) + " Personas & Start Debate" + (selectedSuggestions.size > 12 ? " (capped at 12)" : "")}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         );
       }
@@ -908,42 +1263,86 @@
       // ═══════════════════════════════════════════
       if (page === "debate") {
         const debateConvMsgs = () => {
-          const m = msgsRef.current;
-          if (m.length === 0) return [{ role: "user", content: "The debate is starting. Topic: \"" + topic + "\". Share your opening thoughts." }];
-          return [{ role: "user", content: "Debate transcript so far:\n\n" + m.map(x => "[" + x.name + "]: " + x.text).join("\n\n") + "\n\nShare your thoughts on what has been discussed." }];
+          const m = msgsRef.current.filter(x => !x.isSystem);
+          if (m.length === 0) {
+            return [{ role: "user", content: "The debate has just started on the topic: \"" + topic + "\". Give your opening statement — your core position and your single strongest argument for it." }];
+          }
+          const WINDOW = 20;
+          const skipped = Math.max(0, m.length - WINDOW);
+          const recent = m.slice(-WINDOW);
+          const lastMsg = recent[recent.length - 1];
+          const transcript = recent.map(x => "[" + x.name + "]: " + x.text).join("\n\n");
+          const prefix = skipped > 0 ? "[" + skipped + " earlier messages omitted for brevity]\n\n" : "";
+          return [{ role: "user", content: prefix + "Debate transcript:\n\n" + transcript + "\n\n---\n\n" + lastMsg.name + " just made the above argument. Directly respond to their specific points — refute, challenge, or build on them — then advance your own position. Stay fully in character." }];
         };
 
-        const debateSysPrompt = (seat, idx, side) => {
-          const len = answerLength;
+        const debateSysPrompt = (seat, idx, side, liveRound, liveScore, liveHistory) => {
           const sideLabel = debateFormat === "sides" ? (side === "for" ? "FOR" : "AGAINST") : "neutral";
-          const scoreHint = debateScore < 50 ? "Currently AGAINST is winning (" + (100-debateScore) + ")" : debateScore > 50 ? "Currently FOR is winning (" + debateScore + ")" : "Currently neutral";
-          const lastScore = debateScoreHistory.length > 0 ? debateScoreHistory[debateScoreHistory.length - 1].score : 50;
+          const score = liveScore !== undefined ? liveScore : debateScore;
+          const round = liveRound !== undefined ? liveRound : debateRound;
+          const history = liveHistory !== undefined ? liveHistory : debateScoreHistory;
+          const scoreHint = score < 50 ? "Currently AGAINST is winning (" + (100-score) + "%)" : score > 50 ? "Currently FOR is winning (" + score + "%)" : "Debate is currently tied";
+          const lastScore = history.length > 0 ? history[history.length - 1].score : 50;
           return "You are " + seat.name + ", " + seat.title + ".\n\n" + seat.instructions + "\n\n" +
             "You are in a structured debate about: \"" + topic + "\"\n" +
             (debateFormat === "sides" ? "Your position: " + sideLabel + "\n" : "") +
-            "Debate status: Round " + debateRound + " of " + debateTotalRounds + "\n" +
-            scoreHint + "\nLast score: " + lastScore + "\n\n" +
+            "Debate status: Round " + round + " of " + debateTotalRounds + "\n" +
+            scoreHint + " (last scored: " + lastScore + "/100)\n\n" +
             (context ? "Debate context:\n" + context + "\n\n" : "") +
-            "Make compelling arguments for your position. Counter previous arguments. Use evidence and logic. Be specific and thoughtful.\n" +
-            LENGTHS[len].prompt + "\n\nDo NOT prefix with your name.";
+            LENGTHS[answerLength].prompt + "\n\n" +
+            "Make compelling, in-character arguments. Directly counter the previous speaker's specific points. Use evidence, logic, and your unique perspective.\n\nDo NOT prefix your response with your name.";
         };
 
-        const scoreDebate = async () => {
-          if (messages.length === 0) return;
+        // Helper: get effective side for a seat (explicit override > index default)
+        const getSeatSide = (seat, idx) => {
+          if (seat && seat.side) return seat.side;
+          return debateFormat === "sides" ? (idx < 6 ? "for" : "against") : "neutral";
+        };
+
+        // Cycle a seat's side override on click
+        const cycleSeatSide = (i, e) => {
+          e.stopPropagation();
+          const sides = ["for", "against", "neutral"];
+          const current = getSeatSide(seats[i], i);
+          const next = sides[(sides.indexOf(current) + 1) % sides.length];
+          const newSeats = [...seats];
+          newSeats[i] = { ...newSeats[i], side: next };
+          setSeats(newSeats);
+        };
+
+        const scoreDebate = async (roundNum) => {
+          const nonSystemMsgs = msgsRef.current.filter(m => !m.isSystem);
+          if (nonSystemMsgs.length === 0) return;
+          if (scoringRef.current) return; // skip if a scoring call is already in-flight
+          scoringRef.current = true;
+          setScoringInProgress(true);
           const cfg = getAgentConfig(null);
-          if (!cfg.apiKey) return;
+          if (!cfg.apiKey) { scoringRef.current = false; setScoringInProgress(false); return; }
           try {
-            const transcript = messages.filter(m => !m.isSystem).map(m => "[" + m.name + "]: " + m.text).join("\n\n");
+            // Use last 10 messages for scoring to keep it fast
+            const recent = nonSystemMsgs.slice(-10);
+            const transcript = recent.map(m => "[" + m.name + "]: " + m.text).join("\n\n");
             const prompt = "Based on this debate about \"" + topic + "\", determine which side is winning (0=fully AGAINST, 100=fully FOR, 50=neutral). Return JSON: {\"score\": number, \"reason\": \"string (1 sentence)\"}";
             const result = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model,
-              "You are a neutral debate judge. Evaluate arguments objectively.",
-              [{ role: "user", content: prompt + "\n\nTranscript:\n" + transcript }], 300);
+              "You are a neutral debate judge. Evaluate arguments objectively. Reply with only valid JSON.",
+              [{ role: "user", content: prompt + "\n\nRecent transcript:\n" + transcript }], 200);
             let parsed = { score: 50, reason: "" };
-            try { parsed = JSON.parse(result); } catch (_) { const m = result.match(/(\d+)/); parsed.score = m ? parseInt(m[1]) : 50; parsed.reason = result; }
-            const newScore = Math.max(0, Math.min(100, parsed.score || 50));
+            try {
+              const clean = result.replace(/```[a-z]*\n?/gi, "").replace(/```/g, "").trim();
+              parsed = JSON.parse(clean);
+            } catch (_) { const m = result.match(/\d+/); parsed.score = m ? parseInt(m[0]) : 50; parsed.reason = result.slice(0, 80); }
+            const newScore = Math.max(0, Math.min(100, Math.round(parsed.score || 50)));
             setDebateScore(newScore);
-            setDebateScoreHistory(h => [...h, { round: debateRound, score: newScore, reason: parsed.reason }]);
-          } catch (_) {}
+            debateScoreRef.current = newScore;
+            setDebateScoreHistory(h => {
+              const entry = { round: roundNum !== undefined ? roundNum : h.length + 1, score: newScore, reason: parsed.reason || "" };
+              const updated = [...h, entry];
+              debateHistoryRef.current = updated;
+              return updated;
+            });
+          } catch (e) { console.error("scoreDebate failed:", e.message); }
+          scoringRef.current = false;
+          setScoringInProgress(false);
         };
 
 
@@ -953,8 +1352,8 @@
           const cfg = getAgentConfig(seat);
           if (!cfg.apiKey) { setError("Set API key for " + (PROVIDERS[cfg.baseUrl]?.label || "provider") + " in Settings"); return; }
           setError(""); setLoading(true); setLoadingSeat(si);
-          const side = debateFormat === "sides" ? (si < 6 ? "for" : "against") : "neutral";
-          const sys = debateSysPrompt(seat, si, side);
+          const side = getSeatSide(seat, si);
+          const sys = debateSysPrompt(seat, si, side, debateRound, debateScoreRef.current, debateHistoryRef.current);
           const conv = debateConvMsgs();
           const temp = seat.temperature !== undefined ? seat.temperature : DEFAULT_TEMP;
           const msg = { seatIndex: si, name: seat.name, text: "", isUser: false, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
@@ -968,64 +1367,121 @@
             } catch (e2) { undoMessage(); setError("API Error: " + e2.message); }
           }
           setLoading(false); setLoadingSeat(null);
+          scoreDebate(); // fire-and-forget — score bar updates in background
         };
 
         const debateRoundAuto = async () => {
-          if (debateRound >= debateTotalRounds || occupied.length === 0) return;
+          if (occupied.length === 0) return;
+          // Capture values at invocation time — avoids stale closure across rounds
+          const total = debateTotalRounds;
+          let round = debateRound;
+          debateRunningRef.current = true;
           setDebateRunning(true);
-          const newRound = debateRound + 1;
-          setDebateRound(newRound);
-          for (const s of occupied) {
-            if (!debateRunning) break;
-            setLoadingSeat(s.idx);
-            const cfg = getAgentConfig(seats[s.idx]);
-            if (!cfg.apiKey) break;
-            const side = debateFormat === "sides" ? (s.idx < 6 ? "for" : "against") : "neutral";
-            const sys = debateSysPrompt(seats[s.idx], s.idx, side);
-            const conv = debateConvMsgs();
-            const temp = seats[s.idx].temperature !== undefined ? seats[s.idx].temperature : DEFAULT_TEMP;
-            const msg = { seatIndex: s.idx, name: s.name, text: "", isUser: false, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
-            addMessage(msg);
-            try {
-              await callAPIStream(cfg.apiKey, cfg.baseUrl, cfg.model, sys, conv, LENGTHS[answerLength].tokens, temp, updateLastMessage);
-            } catch (e) {
+          while (round < total && debateRunningRef.current) {
+            round++;
+            setDebateRound(round);
+            for (const s of occupied) {
+              if (!debateRunningRef.current) break;
+              setLoadingSeat(s.idx);
+              const cfg = getAgentConfig(seats[s.idx]);
+              if (!cfg.apiKey) { setError("Set API key for " + (PROVIDERS[cfg.baseUrl]?.label || "provider")); debateRunningRef.current = false; break; }
+              const side = getSeatSide(seats[s.idx], s.idx);
+              const sys = debateSysPrompt(seats[s.idx], s.idx, side, round, debateScoreRef.current, debateHistoryRef.current);
+              const conv = debateConvMsgs();
+              const temp = seats[s.idx].temperature !== undefined ? seats[s.idx].temperature : DEFAULT_TEMP;
+              const msg = { seatIndex: s.idx, name: s.name, text: "", isUser: false, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
+              addMessage(msg);
               try {
-                const text = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model, sys, conv, LENGTHS[answerLength].tokens, temp);
-                updateLastMessage(text);
-              } catch (_) { break; }
+                await callAPIStream(cfg.apiKey, cfg.baseUrl, cfg.model, sys, conv, LENGTHS[answerLength].tokens, temp, updateLastMessage);
+              } catch (e) {
+                try {
+                  const text = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model, sys, conv, LENGTHS[answerLength].tokens, temp);
+                  updateLastMessage(text);
+                } catch (_) { debateRunningRef.current = false; break; }
+              }
+              // Score after every message — fire-and-forget so it doesn't block next speaker
+              scoreDebate(round);
+            }
+            setLoadingSeat(null);
+            if (!debateRunningRef.current) break;
+            if (round < total && debateRunningRef.current) {
+              await new Promise(r => setTimeout(r, 200));
             }
           }
-          setLoadingSeat(null);
-          if (!debateRunning) return;
-          await scoreDebate();
-          await new Promise(r => setTimeout(r, 500));
-          if (!debateRunning) return;
-          if (newRound < debateTotalRounds) {
-            debateRoundAuto();
-          } else {
-            setDebateRunning(false);
-          }
+          debateRunningRef.current = false;
+          setDebateRunning(false);
         };
 
         const finishDebate = async () => {
           const cfg = getAgentConfig(null);
           if (!cfg.apiKey) { setError("Set API key"); return; }
-          setLoading(true); setError("");
+          // Stop any running debate loop
+          debateRunningRef.current = false;
+          setDebateRunning(false);
+          setLoading(true); setGeneratingSummary(true); setError("");
           try {
-            const transcript = messages.filter(m => !m.isSystem).map(m => "[" + m.name + "]: " + m.text).join("\n\n");
+            const transcript = msgsRef.current.filter(m => !m.isSystem).map(m => "[" + m.name + "]: " + m.text).join("\n\n");
             const parts = occupied.map(s => s.name + " (" + s.title + ")").join(", ");
-            const finalScore = debateScore;
-            const winner = finalScore > 55 ? "FOR" : finalScore < 45 ? "AGAINST" : "Neutral";
-            const prompt = "Generate a comprehensive debate summary:\n\nTopic: " + topic + "\nFormat: " + debateFormat + "\nParticipants: " + parts + "\nFinal Score: " + finalScore + "/100 (winner: " + winner + ")\nRounds: " + debateScoreHistory.length + "\n\nProvide:\n1. Who won and by how much\n2. Key arguments from each side\n3. Turning points\n4. Statistics\n5. Meeting minutes";
+            const finalScore = debateScoreRef.current;
+            const winner = finalScore > 55 ? "FOR (YES)" : finalScore < 45 ? "AGAINST (NO)" : "Neutral / Draw";
+            // Build score movement narrative from history — use ref for freshest data
+            const liveHistory = debateHistoryRef.current;
+            const scoreMoves = liveHistory.length > 0
+              ? liveHistory.map((h, i) => {
+                  const prev = i === 0 ? 50 : liveHistory[i - 1].score;
+                  const delta = h.score - prev;
+                  const dir = delta > 0 ? "▲ FOR +" + delta : delta < 0 ? "▼ AGAINST +" + Math.abs(delta) : "— No change";
+                  return "Round " + h.round + ": " + dir + " pts → score " + h.score + " | " + (h.reason || "");
+                }).join("\n")
+              : "No scoring history available.";
+            const prompt = `Generate a debate analysis report in clean Markdown. Topic: "${topic}"
+Format: ${debateFormat === "sides" ? "FOR vs AGAINST" : "Free-form"}
+Participants: ${parts}
+Rounds: ${debateScoreHistory.length}
+Final Score: ${finalScore}/100 → Winner: **${winner}**
+
+Score movement per round (50=neutral, higher=FOR winning):
+${scoreMoves}
+
+Write the report with these sections using proper Markdown headers (##):
+
+## 1. Result
+Winner, final score, margin of victory (1-2 sentences).
+
+## 2. Score Movement — What Moved the Needle
+For each round: which specific argument shifted the score, by how many points, and why it was persuasive. Use a table: | Round | Argument | Points Moved | Direction |
+
+## 3. Key Arguments — FOR side
+Table: | # | Argument | Strength Assessment |
+
+## 4. Key Arguments — AGAINST side
+Table: | # | Argument | Strength Assessment |
+
+## 5. Turning Points
+2-3 specific moments that changed the debate's direction.
+
+## 6. Final Verdict
+1 paragraph: overall quality of debate, who debated better and why.`;
             const summary = await callAPI(cfg.apiKey, cfg.baseUrl, cfg.model,
-              "You are a professional debate analyst. Provide thorough, structured analysis.",
-              [{ role: "user", content: prompt + "\n\nTranscript:\n" + transcript }], 2000);
+              "You are a professional debate analyst. Write clear, structured Markdown. Do not use raw HTML.",
+              [{ role: "user", content: prompt + "\n\nFull transcript:\n" + transcript }], 2500);
             setDebateSummary(summary);
-            const tokenApprox = Math.round((messages.filter(m => !m.isSystem).reduce((a, m) => a + m.text.length / 4, 0)) + (summary.length / 4));
-            setDebateStats({ roundsCompleted: debateScoreHistory.length, totalMessages: messages.filter(m => !m.isSystem).length, approxTokens: tokenApprox, finalScore });
+            const liveMsgs = msgsRef.current.filter(m => !m.isSystem);
+            const tokenApprox = Math.round((liveMsgs.reduce((a, m) => a + m.text.length / 4, 0)) + (summary.length / 4));
+            const stats = { roundsCompleted: liveHistory.length, totalMessages: liveMsgs.length, approxTokens: tokenApprox, finalScore };
+            setDebateStats(stats);
+            setDebateIsFinished(true);
             setDebateFinished(true);
+            // Sync state before saving
+            setDebateScore(finalScore);
+            setDebateScoreHistory(liveHistory);
+            // Auto-save with finished flag and summary baked in
+            const saveName = currentSaveName || topic || ("Debate " + new Date().toLocaleDateString());
+            const finishedState = { seats, messages: msgsRef.current, topic, tableTheme, agenda, activeAgendaIdx, context, simMode, debateFormat, debateSide, debateScore: finalScore, debateScoreHistory: liveHistory, debateRound, debateTotalRounds, finished: true, debateSummary: summary, debateStats: stats };
+            await fetch("/api/saves", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: saveName, state: finishedState }) });
+            setCurrentSaveName(saveName); refreshConversations();
           } catch (e) { setError("Summary error: " + e.message); }
-          setLoading(false);
+          setLoading(false); setGeneratingSummary(false);
         };
 
         return (
@@ -1063,26 +1519,36 @@
                 <button onClick={() => { setMessages([]); msgsRef.current = []; undoStack.current = []; setCanUndo(false); setDebateRound(0); setDebateScore(50); setDebateScoreHistory([]); }} disabled={loading || !messages.length}
                   className="p-1.5 rounded-lg hover:bg-slate-700/60 text-slate-400 disabled:opacity-30 flex-shrink-0" title="Clear chat"><IcoTrash size={15} /></button>
               </div>
-              <button onClick={finishDebate} disabled={loading || messages.length === 0}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-600/90 hover:bg-amber-500 disabled:opacity-30 text-xs font-semibold transition-colors flex-shrink-0">
-                <IcoFile size={13} /> Finish
-              </button>
+              {debateIsFinished ? (
+                <button onClick={() => setDebateFinished(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700/60 text-emerald-300 text-xs font-semibold flex-shrink-0 border border-emerald-600/30">
+                  ✓ Concluded — View Summary
+                </button>
+              ) : (
+                <button onClick={finishDebate} disabled={loading || messages.length === 0}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-600/90 hover:bg-amber-500 disabled:opacity-30 text-xs font-semibold transition-colors flex-shrink-0">
+                  {generatingSummary ? <><span className="animate-spin inline-block">⟳</span> Analyzing...</> : <><IcoFile size={13} /> Finish</>}
+                </button>
+              )}
             </div>
 
             {/* Score Bar */}
             <div className="px-3 pt-2 flex-shrink-0">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-slate-400">Round {debateRound}</span>
-                <span className="text-xs text-slate-400">{debateFormat === "sides" ? "FOR vs AGAINST" : "Free-form"}</span>
+                <span className="text-xs text-slate-400">Round {debateRound}/{debateTotalRounds}</span>
+                <div className="flex items-center gap-2">
+                  {scoringInProgress && <span className="text-[10px] text-amber-400 flex items-center gap-0.5"><span className="animate-spin inline-block">⟳</span> Scoring…</span>}
+                  <span className="text-xs text-slate-400">{debateFormat === "sides" ? "FOR vs AGAINST" : "Free-form"}</span>
+                </div>
               </div>
-              <div className="relative h-6 rounded-full overflow-hidden bg-slate-700/50 border border-slate-600/40">
+              <div className="relative h-6 rounded-full overflow-hidden bg-slate-700/50 border border-slate-600/40"
+                style={scoringInProgress ? { boxShadow: "0 0 0 1px rgba(251,191,36,0.4)" } : {}}>
                 <div className="absolute inset-0 flex">
-                  <div style={{ width: (100 - debateScore) + "%", opacity: debateScore < 50 ? 0.8 : 0.3 }} className="bg-gradient-to-r from-red-600 to-red-500 transition-all duration-500" />
-                  <div style={{ width: debateScore + "%", opacity: debateScore > 50 ? 0.8 : 0.3 }} className="bg-gradient-to-r from-green-500 to-green-600 transition-all duration-500" />
+                  <div style={{ width: debateScore + "%", opacity: debateScore > 50 ? 0.8 : 0.3 }} className="bg-gradient-to-r from-green-500 to-green-600 transition-all duration-700" />
+                  <div style={{ width: (100 - debateScore) + "%", opacity: debateScore < 50 ? 0.8 : 0.3 }} className="bg-gradient-to-r from-red-600 to-red-500 transition-all duration-700" />
                 </div>
                 <div className="absolute inset-0 flex items-center justify-between px-4 text-[10px] font-bold text-white pointer-events-none">
-                  <span>NO ({100-debateScore}%)</span>
                   <span>YES ({debateScore}%)</span>
+                  <span>NO ({100-debateScore}%)</span>
                 </div>
               </div>
             </div>
@@ -1124,12 +1590,26 @@
                         {seat ? (
                           <div className="space-y-2">
                             <div className="flex items-center gap-2 mb-1">
-                              {debateFormat === "sides" && <span className="px-2 py-0.5 rounded-full bg-emerald-600/60 text-[9px] font-bold text-white">FOR</span>}
+                              {(() => {
+                                const side = getSeatSide(seat, i);
+                                const cfg = side === "for"
+                                  ? { label: "FOR", cls: "bg-emerald-600/70 hover:bg-emerald-500/80 text-white" }
+                                  : side === "against"
+                                  ? { label: "AGAINST", cls: "bg-red-600/70 hover:bg-red-500/80 text-white" }
+                                  : { label: "NEUTRAL", cls: "bg-slate-600/70 hover:bg-slate-500/80 text-slate-200" };
+                                return <button onClick={e => cycleSeatSide(i, e)} title="Click to change side" className={"px-2 py-0.5 rounded-full text-[9px] font-bold transition-colors cursor-pointer " + cfg.cls}>{cfg.label} ▸</button>;
+                              })()}
                             </div>
                             <div className="flex items-center gap-2.5">
-                              <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-md flex-shrink-0" style={{ backgroundColor: c.initBg }}>{seat.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}</div>
+                              <div className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 shadow-md border border-slate-600/30" style={{ backgroundColor: c.initBg }}>
+                                {seat.imageUrl ? <img src={seat.imageUrl} alt={seat.name} className="w-full h-full object-cover" onError={e => { e.target.style.display="none"; }} /> : null}
+                                {!seat.imageUrl && <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold">{seat.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}</div>}
+                              </div>
                               <div className="min-w-0 flex-1">
-                                <div className="text-sm font-semibold text-slate-100 truncate">{seat.name}</div>
+                                <div className="text-sm font-semibold text-slate-100 truncate flex items-center gap-1">
+                                  {seat.name}
+                                  {seat.profileUrl && <a href={seat.profileUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-blue-400 hover:text-blue-300 flex-shrink-0 text-[10px]" title="Wikipedia">↗</a>}
+                                </div>
                                 <div className="text-[11px] text-slate-400 truncate">{seat.title}</div>
                               </div>
                             </div>
@@ -1139,7 +1619,7 @@
                                 <span className="text-xs text-slate-400 ml-1">Speaking...</span>
                               </div>
                             ) : (
-                              <button onClick={e => { e.stopPropagation(); debateSpeak(i); }} disabled={loading} className="w-full py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:brightness-110 disabled:opacity-30 shadow-sm" style={{ backgroundColor: c.ring }}>Speak</button>
+                              <button onClick={e => { e.stopPropagation(); debateSpeak(i); }} disabled={loading || debateIsFinished} className="w-full py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:brightness-110 disabled:opacity-30 shadow-sm" style={{ backgroundColor: c.ring }}>{debateIsFinished ? "Concluded" : "Speak"}</button>
                             )}
                           </div>
                         ) : (
@@ -1182,17 +1662,17 @@
                       <button onClick={sendUser} disabled={!userInput.trim()} className="px-3 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 disabled:opacity-20 transition-all"><IcoSend size={15} /></button>
                       <button onClick={undoMessage} disabled={loading || !canUndo}
                         className="px-2.5 rounded-xl bg-slate-600/50 hover:bg-slate-600 disabled:opacity-20 transition-all" title="Undo last message"><IcoUndo size={14} /></button>
-                      {!debateRunning && (
+                      {!debateRunning && !debateIsFinished && (
                         <div className="flex items-center gap-1">
                           <input type="number" value={debateTotalRounds} onChange={e => setDebateTotalRounds(Math.max(1, parseInt(e.target.value) || 1))} min="1" max="50"
                             className="w-12 rounded-lg px-2 py-2 text-xs text-center bg-slate-700/60 outline-none focus:ring-1 focus:ring-purple-500/40 text-slate-200" title="Number of rounds" />
-                          <button onClick={debateRoundAuto} disabled={loading || occupied.length === 0} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-purple-600/80 hover:bg-purple-500 disabled:opacity-20 text-xs font-semibold transition-all whitespace-nowrap">
+                          <button onClick={() => debateRoundAuto()} disabled={loading || occupied.length === 0} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-purple-600/80 hover:bg-purple-500 disabled:opacity-20 text-xs font-semibold transition-all whitespace-nowrap">
                             <IcoPlay size={13} /> Run Rounds
                           </button>
                         </div>
                       )}
                       {debateRunning && (
-                        <button onClick={() => setDebateRunning(false)} className="flex items-center gap-1.5 px-3 rounded-xl bg-red-600/80 hover:bg-red-500 text-xs font-semibold transition-all whitespace-nowrap">
+                        <button onClick={() => { debateRunningRef.current = false; setDebateRunning(false); }} className="flex items-center gap-1.5 px-3 rounded-xl bg-red-600/80 hover:bg-red-500 text-xs font-semibold transition-all whitespace-nowrap">
                           <IcoX size={13} /> Pause
                         </button>
                       )}
@@ -1211,12 +1691,26 @@
                         {seat ? (
                           <div className="space-y-2">
                             <div className="flex items-center gap-2 mb-1">
-                              {debateFormat === "sides" && <span className="px-2 py-0.5 rounded-full bg-red-600/60 text-[9px] font-bold text-white">AGAINST</span>}
+                              {(() => {
+                                const side = getSeatSide(seat, i);
+                                const cfg = side === "for"
+                                  ? { label: "FOR", cls: "bg-emerald-600/70 hover:bg-emerald-500/80 text-white" }
+                                  : side === "against"
+                                  ? { label: "AGAINST", cls: "bg-red-600/70 hover:bg-red-500/80 text-white" }
+                                  : { label: "NEUTRAL", cls: "bg-slate-600/70 hover:bg-slate-500/80 text-slate-200" };
+                                return <button onClick={e => cycleSeatSide(i, e)} title="Click to change side" className={"px-2 py-0.5 rounded-full text-[9px] font-bold transition-colors cursor-pointer " + cfg.cls}>{cfg.label} ▸</button>;
+                              })()}
                             </div>
                             <div className="flex items-center gap-2.5">
-                              <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-md flex-shrink-0" style={{ backgroundColor: c.initBg }}>{seat.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}</div>
+                              <div className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 shadow-md border border-slate-600/30" style={{ backgroundColor: c.initBg }}>
+                                {seat.imageUrl ? <img src={seat.imageUrl} alt={seat.name} className="w-full h-full object-cover" onError={e => { e.target.style.display="none"; }} /> : null}
+                                {!seat.imageUrl && <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold">{seat.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}</div>}
+                              </div>
                               <div className="min-w-0 flex-1">
-                                <div className="text-sm font-semibold text-slate-100 truncate">{seat.name}</div>
+                                <div className="text-sm font-semibold text-slate-100 truncate flex items-center gap-1">
+                                  {seat.name}
+                                  {seat.profileUrl && <a href={seat.profileUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-blue-400 hover:text-blue-300 flex-shrink-0 text-[10px]" title="Wikipedia">↗</a>}
+                                </div>
                                 <div className="text-[11px] text-slate-400 truncate">{seat.title}</div>
                               </div>
                             </div>
@@ -1226,7 +1720,7 @@
                                 <span className="text-xs text-slate-400 ml-1">Speaking...</span>
                               </div>
                             ) : (
-                              <button onClick={e => { e.stopPropagation(); debateSpeak(i); }} disabled={loading} className="w-full py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:brightness-110 disabled:opacity-30 shadow-sm" style={{ backgroundColor: c.ring }}>Speak</button>
+                              <button onClick={e => { e.stopPropagation(); debateSpeak(i); }} disabled={loading || debateIsFinished} className="w-full py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:brightness-110 disabled:opacity-30 shadow-sm" style={{ backgroundColor: c.ring }}>{debateIsFinished ? "Concluded" : "Speak"}</button>
                             )}
                           </div>
                         ) : (
@@ -1258,6 +1752,19 @@
               </div>
             )}
 
+            {/* Processing Overlay */}
+            {generatingSummary && (
+              <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 anim-fade-fast">
+                <div className="bg-slate-800 rounded-2xl p-8 flex flex-col items-center gap-4 shadow-2xl border border-amber-500/30">
+                  <div className="w-12 h-12 rounded-full border-4 border-amber-500/30 border-t-amber-400 animate-spin" />
+                  <div className="text-center">
+                    <div className="font-bold text-lg text-amber-300 mb-1">Analyzing debate…</div>
+                    <div className="text-sm text-slate-400">Reviewing arguments, scoring rounds, generating summary</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Debate Summary Modal */}
             {debateFinished && (
               <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 anim-fade-fast" onClick={() => setDebateFinished(false)}>
@@ -1266,12 +1773,26 @@
                     <h3 className="font-bold text-lg flex items-center gap-2"><IcoSparkles size={20} className="text-amber-400" /> Debate Summary</h3>
                     <button onClick={() => setDebateFinished(false)} className="text-slate-400 hover:text-white"><IcoX size={18} /></button>
                   </div>
-                  <div className="flex-1 overflow-y-auto bg-slate-900/60 rounded-xl p-4 text-sm whitespace-pre-wrap leading-relaxed text-slate-300 mb-4">{debateSummary}</div>
-                  <div className="grid grid-cols-2 gap-3 mb-4 text-xs">
-                    <div className="bg-slate-700/40 rounded-lg p-3"><div className="text-slate-400">Final Score</div><div className="text-xl font-bold text-emerald-400">{debateStats.finalScore}/100</div></div>
-                    <div className="bg-slate-700/40 rounded-lg p-3"><div className="text-slate-400">Rounds</div><div className="text-xl font-bold text-emerald-400">{debateStats.roundsCompleted}</div></div>
-                    <div className="bg-slate-700/40 rounded-lg p-3"><div className="text-slate-400">Messages</div><div className="text-xl font-bold text-emerald-400">{debateStats.totalMessages}</div></div>
-                    <div className="bg-slate-700/40 rounded-lg p-3"><div className="text-slate-400">Approx Tokens</div><div className="text-xl font-bold text-emerald-400">{debateStats.approxTokens}</div></div>
+                  <div className="flex-1 overflow-y-auto bg-slate-900/60 rounded-xl p-5 mb-4 md-body"
+                    dangerouslySetInnerHTML={{ __html: (() => { const raw = typeof marked !== 'undefined' ? marked.parse(debateSummary) : debateSummary.replace(/\n/g, '<br/>'); return typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(raw) : raw; })() }}
+                  />
+                  <div className="grid grid-cols-4 gap-2 mb-4 text-xs">
+                    <div className="bg-slate-700/40 rounded-lg p-3 text-center">
+                      <div className="text-slate-400 mb-1">Final Score</div>
+                      <div className={"text-xl font-bold " + (debateStats.finalScore > 55 ? "text-green-400" : debateStats.finalScore < 45 ? "text-red-400" : "text-slate-300")}>{debateStats.finalScore}/100</div>
+                    </div>
+                    <div className="bg-slate-700/40 rounded-lg p-3 text-center">
+                      <div className="text-slate-400 mb-1">Winner</div>
+                      <div className={"text-sm font-bold " + (debateStats.finalScore > 55 ? "text-green-400" : debateStats.finalScore < 45 ? "text-red-400" : "text-slate-300")}>{debateStats.finalScore > 55 ? "FOR ✓" : debateStats.finalScore < 45 ? "AGAINST ✓" : "Draw"}</div>
+                    </div>
+                    <div className="bg-slate-700/40 rounded-lg p-3 text-center">
+                      <div className="text-slate-400 mb-1">Rounds</div>
+                      <div className="text-xl font-bold text-emerald-400">{debateStats.roundsCompleted}</div>
+                    </div>
+                    <div className="bg-slate-700/40 rounded-lg p-3 text-center">
+                      <div className="text-slate-400 mb-1">Messages</div>
+                      <div className="text-xl font-bold text-emerald-400">{debateStats.totalMessages}</div>
+                    </div>
                   </div>
                   <div className="flex gap-2 justify-end">
                     <button onClick={() => { navigator.clipboard.writeText(debateSummary); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-semibold flex items-center gap-1.5">
@@ -1332,8 +1853,8 @@
                         </button>
                       </div>
                       <textarea value={editForm.instructions} onChange={e => setEditForm(f => ({...f, instructions: e.target.value}))}
-                        placeholder="Communication style, priorities, personality..." rows={4}
-                        className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none resize-none focus:ring-1 focus:ring-emerald-500/30" />
+                        placeholder="Communication style, priorities, personality, background knowledge, debate stance, argumentation style..." rows={10}
+                        className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none resize-y focus:ring-1 focus:ring-emerald-500/30 min-h-[160px] max-h-[400px]" />
                     </div>
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
@@ -1391,11 +1912,15 @@
             {seat ? (
               <div className="space-y-2">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-md flex-shrink-0" style={{ backgroundColor: c.initBg }}>
-                    {seat.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
+                  <div className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 shadow-md border border-slate-600/30" style={{ backgroundColor: c.initBg }}>
+                    {seat.imageUrl ? <img src={seat.imageUrl} alt={seat.name} className="w-full h-full object-cover" onError={e => { e.target.style.display="none"; }} /> : null}
+                    {!seat.imageUrl && <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold">{seat.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}</div>}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-slate-100 truncate">{seat.name}</div>
+                    <div className="text-sm font-semibold text-slate-100 truncate flex items-center gap-1">
+                      {seat.name}
+                      {seat.profileUrl && <a href={seat.profileUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-blue-400 hover:text-blue-300 flex-shrink-0 text-[10px]" title="Wikipedia">↗</a>}
+                    </div>
                     <div className="text-[11px] text-slate-400 truncate">{seat.title}</div>
                   </div>
                 </div>
@@ -1501,7 +2026,7 @@
                       className={"flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-lg transition-all " + (autoUpdateContext ? "bg-emerald-600/30 text-emerald-300" : "bg-slate-700/40 text-slate-500 hover:text-slate-300")}>
                       Auto {autoUpdateContext ? "ON" : "OFF"}
                     </button>
-                    <button onClick={updateContextAI} disabled={updatingContext || loading || !apiKey || messages.length === 0}
+                    <button onClick={updateContextAI} disabled={updatingContext || loading || !apiKeys[defaultProvider] || messages.length === 0}
                       className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 disabled:opacity-30 transition-all">
                       <IcoSparkles size={11} /> {updatingContext ? "Updating..." : "AI Update"}
                     </button>
@@ -1645,8 +2170,8 @@
                       </button>
                     </div>
                     <textarea value={editForm.instructions} onChange={e => setEditForm(f => ({...f, instructions: e.target.value}))}
-                      placeholder="Communication style, priorities, personality..." rows={4}
-                      className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none resize-none focus:ring-1 focus:ring-emerald-500/30" />
+                      placeholder="Communication style, priorities, personality, background knowledge, debate stance, argumentation style..." rows={10}
+                      className="w-full bg-slate-700/60 rounded-lg px-3 py-2 text-sm outline-none resize-y focus:ring-1 focus:ring-emerald-500/30 min-h-[160px] max-h-[400px]" />
                   </div>
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
