@@ -436,10 +436,10 @@
         if (s.debateStats) setDebateStats(s.debateStats);
         if (s.finished && s.debateSummary) setDebateFinished(true); // re-open summary modal
         undoStack.current = []; setCanUndo(false);
-        // Fetch missing Wikipedia images in background
+        // Fetch Wikipedia images in background — always prefer Wikipedia over saved URLs
         const loadedSeats = s.seats || [];
         loadedSeats.forEach((seat, idx) => {
-          if (seat && seat.profileUrl && !seat.imageUrl) {
+          if (seat && seat.profileUrl) {
             fetchWikiImage(seat.profileUrl).then(url => {
               if (url) setSeats(prev => { const u = [...prev]; if (u[idx]) u[idx] = { ...u[idx], imageUrl: url }; return u; });
             });
@@ -1121,7 +1121,7 @@ For each persona write COMPREHENSIVE, RICH instructions — 4 detailed paragraph
 4. Their BLIND SPOTS and WEAKNESSES: where their argument breaks down, what they refuse to acknowledge, biases they can't see
 
 JSON format — output ONLY the array, no markdown:
-[{"name":"...","title":"...","instructions":"...","side":"for"|"against"|"neutral","archetype":"...","profileUrl":"https://en.wikipedia.org/wiki/Name or null","imageUrl":"direct image URL or null"},...]
+[{"name":"...","title":"...","instructions":"...","side":"for"|"against"|"neutral","archetype":"...","profileUrl":"https://en.wikipedia.org/wiki/Name or null"},...]
 
 Return the array starting with [ and ending with ]. Nothing else.`;
 
@@ -1215,9 +1215,9 @@ Return the array starting with [ and ending with ]. Nothing else.`;
           setSeats(newSeats);
           setShowSuggestions(false);
           setPage("debate");
-          // Fetch Wikipedia images in background for all seated personas
+          // Fetch Wikipedia images in background — always prefer Wikipedia over AI-generated URLs
           newSeats.forEach((s, idx) => {
-            if (s && s.profileUrl && !s.imageUrl) {
+            if (s && s.profileUrl) {
               fetchWikiImage(s.profileUrl).then(url => {
                 if (url) setSeats(prev => { const u = [...prev]; if (u[idx]) u[idx] = { ...u[idx], imageUrl: url }; return u; });
               });
