@@ -334,11 +334,13 @@
       const scoringRef = useRef(false);
       const debateScoreRef = useRef(50);
       const debateHistoryRef = useRef([]);
+      const contextRef = useRef("");
       const [canUndo, setCanUndo] = useState(false);
 
       useEffect(() => { msgsRef.current = messages; }, [messages]);
       useEffect(() => { debateScoreRef.current = debateScore; }, [debateScore]);
       useEffect(() => { debateHistoryRef.current = debateScoreHistory; }, [debateScoreHistory]);
+      useEffect(() => { contextRef.current = context; }, [context]);
       useEffect(() => { if (chatRef.current && !userHoveringChat.current) chatRef.current.scrollTo({ top: chatRef.current.scrollHeight, behavior: "smooth" }); }, [messages]);
 
       // ── Load settings + personas + autosave on startup ──
@@ -1375,7 +1377,7 @@ Return the array starting with [ and ending with ]. Nothing else.`;
             (debateFormat === "sides" ? "Your position: " + sideLabel + "\n" : "") +
             "Debate status: Round " + round + "\n" +
             scoreHint + " (last scored: " + lastScore + "/100)\n\n" +
-            (context ? "Debate context:\n" + context + "\n\n" : "") +
+            (contextRef.current ? "Debate context:\n" + contextRef.current + "\n\n" : "") +
             LENGTHS[answerLength].prompt + "\n\n" +
             "Make compelling, in-character arguments. Directly counter the previous speaker's specific points. Use evidence, logic, and your unique perspective.\n\nDo NOT prefix your response with your name.";
         };
@@ -1455,7 +1457,7 @@ Return the array starting with [ and ending with ]. Nothing else.`;
                 "\nRound: " + roundNum + " of " + debateTotalRounds +
                 "\nScore: " + scoreLabel +
                 "\nParticipants: " + parts +
-                (context ? "\n\nPrevious context:\n" + context : "") +
+                (contextRef.current ? "\n\nPrevious context:\n" + contextRef.current : "") +
                 "\n\nRecent transcript:\n" + transcript +
                 "\n\nGenerate an updated debate context covering: strongest arguments made so far per side, key rebuttals, unaddressed points, and the current momentum." }], 500);
             setContext(text); setShowContext(true);
