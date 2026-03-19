@@ -1521,11 +1521,15 @@ Return the array starting with [ and ending with ]. Nothing else.`;
             }
             setLoadingSeat(null);
             if (!debateRunningRef.current) break;
-            // Auto-build debate context at end of each round
-            await updateDebateContext(round);
+            // Auto-build debate context at end of each round (skip last — handled after loop)
             if (round < target && debateRunningRef.current) {
+              await updateDebateContext(round);
               await new Promise(r => setTimeout(r, 200));
             }
+          }
+          // Always update context after the final round completes
+          if (msgsRef.current.filter(m => !m.isSystem).length > 0) {
+            await updateDebateContext(round);
           }
           debateRunningRef.current = false;
           setDebateRunning(false);
