@@ -328,6 +328,7 @@
       const msgsRef = useRef([]);
       const autosaveTimer = useRef(null);
       const chatRef = useRef(null);
+      const userHoveringChat = useRef(false);
       const undoStack = useRef([]);
       const debateRunningRef = useRef(false);
       const scoringRef = useRef(false);
@@ -338,7 +339,7 @@
       useEffect(() => { msgsRef.current = messages; }, [messages]);
       useEffect(() => { debateScoreRef.current = debateScore; }, [debateScore]);
       useEffect(() => { debateHistoryRef.current = debateScoreHistory; }, [debateScoreHistory]);
-      useEffect(() => { if (chatRef.current) chatRef.current.scrollTo({ top: chatRef.current.scrollHeight, behavior: "smooth" }); }, [messages]);
+      useEffect(() => { if (chatRef.current && !userHoveringChat.current) chatRef.current.scrollTo({ top: chatRef.current.scrollHeight, behavior: "smooth" }); }, [messages]);
 
       // ── Load settings + personas + autosave on startup ──
       useEffect(() => {
@@ -1752,7 +1753,7 @@ Table: | # | Argument | Strength Assessment |
                   })}
                 </div>
                 <div className="flex-1 flex flex-col overflow-hidden rounded-[2.5rem] border-[6px] shadow-2xl transition-all duration-500" style={{ borderColor: th.rim, background: "radial-gradient(ellipse at 50% 40%, "+th.felt[0]+" 0%, "+th.felt[1]+" 50%, "+th.felt[2]+" 100%)", boxShadow: "inset 0 2px 20px rgba(0,0,0,0.3), 0 8px 40px rgba(0,0,0,0.4)" }}>
-                  <div ref={chatRef} className="flex-1 overflow-y-auto p-4 space-y-2.5">
+                  <div ref={chatRef} className="flex-1 overflow-y-auto p-4 space-y-2.5" onMouseEnter={() => userHoveringChat.current = true} onMouseLeave={() => { userHoveringChat.current = false; if (chatRef.current) chatRef.current.scrollTo({ top: chatRef.current.scrollHeight, behavior: "smooth" }); }}>
                     {messages.length === 0 ? (
                       <div className="flex items-center justify-center h-full">
                         <div className="text-center space-y-2" style={{ color: "rgba(255,255,255,0.15)" }}>
@@ -2189,7 +2190,7 @@ Table: | # | Argument | Strength Assessment |
               <div className="flex flex-col gap-3 justify-around w-44 flex-shrink-0">{[0,1,2].map(i => <SeatCard key={i} idx={i} />)}</div>
               <div className="flex-1 flex flex-col overflow-hidden rounded-[2.5rem] border-[6px] shadow-2xl transition-all duration-500"
                 style={{ borderColor: th.rim, background: "radial-gradient(ellipse at 50% 40%, "+th.felt[0]+" 0%, "+th.felt[1]+" 50%, "+th.felt[2]+" 100%)", boxShadow: "inset 0 2px 20px rgba(0,0,0,0.3), 0 8px 40px rgba(0,0,0,0.4)" }}>
-                <div ref={chatRef} className="flex-1 overflow-y-auto p-4 space-y-2.5">
+                <div ref={chatRef} className="flex-1 overflow-y-auto p-4 space-y-2.5" onMouseEnter={() => userHoveringChat.current = true} onMouseLeave={() => { userHoveringChat.current = false; if (chatRef.current) chatRef.current.scrollTo({ top: chatRef.current.scrollHeight, behavior: "smooth" }); }}>
                   {messages.length === 0 ? (
                     <div className="flex items-center justify-center h-full">
                       <div className="text-center space-y-2" style={{ color: "rgba(255,255,255,0.15)" }}>
