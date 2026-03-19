@@ -51,6 +51,8 @@
       { ring: "#14b8a6", initBg: "#14b8a6" }, { ring: "#f97316", initBg: "#f97316" },
       { ring: "#6366f1", initBg: "#6366f1" }, { ring: "#84cc16", initBg: "#84cc16" },
       { ring: "#e11d48", initBg: "#e11d48" }, { ring: "#06b6d4", initBg: "#06b6d4" },
+      { ring: "#a855f7", initBg: "#a855f7" }, { ring: "#22d3ee", initBg: "#22d3ee" },
+      { ring: "#fb923c", initBg: "#fb923c" }, { ring: "#4ade80", initBg: "#4ade80" },
     ];
     const TABLE_THEMES = {
       green:  { felt: ["#065f46","#064e3b","#022c22"], rim: "#78350f", inputBg: "rgba(6,79,59,0.3)",   border: "rgba(6,78,59,0.4)",   label: "Classic Green" },
@@ -425,8 +427,8 @@
       const loadState = (s) => {
         if (s.seats) {
           // Ensure debate mode has 12 seats
-          if (s.simMode === "debate" && s.seats.length < 12) {
-            const expanded = [...s.seats, ...Array(12 - s.seats.length).fill(null)];
+          if (s.simMode === "debate" && s.seats.length < 16) {
+            const expanded = [...s.seats, ...Array(16 - s.seats.length).fill(null)];
             setSeats(expanded);
           } else { setSeats(s.seats); }
         }
@@ -501,7 +503,7 @@
 
       // ── New debate ──
       const startNewDebate = () => {
-        setSeats(Array(12).fill(null)); setMessages([]); msgsRef.current = [];
+        setSeats(Array(16).fill(null)); setMessages([]); msgsRef.current = [];
         setTopic(""); setTableTheme("brown"); setCurrentSaveName(""); setError("");
         setAgenda([]); setActiveAgendaIdx(-1); setAgendaInput("");
         setContext(""); setShowContext(false); undoStack.current = []; setCanUndo(false);
@@ -522,7 +524,7 @@
       const occupied = (() => {
         if (simMode !== "debate") return seats.map((s, i) => (s ? { ...s, idx: i } : null)).filter(Boolean);
         const left = [], right = [];
-        seats.forEach((s, i) => { if (s) { if (i < 6) left.push({ ...s, idx: i }); else right.push({ ...s, idx: i }); } });
+        seats.forEach((s, i) => { if (s) { if (i < 8) left.push({ ...s, idx: i }); else right.push({ ...s, idx: i }); } });
         const result = [];
         const max = Math.max(left.length, right.length);
         for (let i = 0; i < max; i++) {
@@ -736,16 +738,18 @@
         const forSide = occ.filter(s => getSeatSide(s, s.idx) === "for");
         const againstSide = occ.filter(s => getSeatSide(s, s.idx) === "against");
         const neutralSide = occ.filter(s => getSeatSide(s, s.idx) === "neutral");
-        // Interleave: For, Against, For, Against... then append Neutrals at the end
-        const sorted = [];
-        const maxPaired = Math.max(forSide.length, againstSide.length);
-        for (let i = 0; i < maxPaired; i++) {
-          if (i < forSide.length) sorted.push(forSide[i]);
-          if (i < againstSide.length) sorted.push(againstSide[i]);
-        }
-        sorted.push(...neutralSide);
+        // Place FOR in left column (0-7), AGAINST in right (8-15), neutrals fill remaining slots
+        const half = Math.floor(seats.length / 2);
         const newSeats = Array(seats.length).fill(null);
-        sorted.forEach((s, i) => { if (i < newSeats.length) { const { idx, ...rest } = s; newSeats[i] = rest; } });
+        let li = 0, ri = half;
+        for (const s of forSide) { if (li < half) { const { idx, ...rest } = s; newSeats[li++] = rest; } }
+        for (const s of againstSide) { if (ri < seats.length) { const { idx, ...rest } = s; newSeats[ri++] = rest; } }
+        // Neutrals fill whichever column has space
+        for (const s of neutralSide) {
+          const { idx, ...rest } = s;
+          if (li < half) { newSeats[li++] = rest; }
+          else if (ri < seats.length) { newSeats[ri++] = rest; }
+        }
         setSeats(newSeats);
       };
       const openEdit = (i) => {
@@ -1139,10 +1143,10 @@
           setError(""); setGeneratingSuggestions(true); setPersonaSuggestions([]);
           try {
             const isSides = debateFormat === "sides";
-            const prompt = `You are casting the ideal 12-person debate panel for: "${topic.trim()}"
+            const prompt = `You are casting the ideal 16-person debate panel for: "${topic.trim()}"
 
-Return a JSON array of EXACTLY 12 personas — the most interesting, diverse, high-contrast panel possible.
-${isSides ? "Balance: 4 FOR + 4 AGAINST + 2 NEUTRAL + 2 WILDCARD/SPECIALIST." : "Balance: 12 diverse perspectives covering the full spectrum of opinion, background, and style."}
+Return a JSON array of EXACTLY 16 personas — the most interesting, diverse, high-contrast panel possible.
+${isSides ? "Balance: 6 FOR + 6 AGAINST + 2 NEUTRAL + 2 WILDCARD/SPECIALIST." : "Balance: 16 diverse perspectives covering the full spectrum of opinion, background, and style."}
 
 IMPORTANT: Where relevant, cast REAL well-known public figures (politicians, CEOs, academics, activists, authors, journalists) who are known to have strong views on this topic or adjacent topics. For real people, provide their Wikipedia URL and a direct image URL. For fictional archetypes, set those fields to null.
 
@@ -1219,7 +1223,7 @@ Return the array starting with [ and ending with ]. Nothing else.`;
               }
             }
             if (!Array.isArray(arr) || arr.length === 0) throw new Error("Expected a non-empty array");
-            const clean = arr.filter(p => p && p.name && p.title && p.instructions).slice(0, 12);
+            const clean = arr.filter(p => p && p.name && p.title && p.instructions).slice(0, 16);
             if (clean.length === 0) throw new Error("Personas missing required fields");
             setPersonaSuggestions(clean);
             setSelectedSuggestions(new Set(clean.map((_, i) => i)));
@@ -1229,17 +1233,17 @@ Return the array starting with [ and ending with ]. Nothing else.`;
         };
 
         const addSelectedPersonas = () => {
-          const toAdd = personaSuggestions.filter((_, i) => selectedSuggestions.has(i)).slice(0, 12);
+          const toAdd = personaSuggestions.filter((_, i) => selectedSuggestions.has(i)).slice(0, 16);
           const newSeats = [...seats];
           for (const p of toAdd) {
             // Find best slot based on side
             let slot = -1;
             if (debateFormat === "sides") {
-              const range = p.side === "against" ? [6, 12] : [0, 6];
+              const range = p.side === "against" ? [8, 16] : [0, 8];
               for (let i = range[0]; i < range[1]; i++) { if (!newSeats[i]) { slot = i; break; } }
-              if (slot === -1) { for (let i = 0; i < 12; i++) { if (!newSeats[i]) { slot = i; break; } } }
+              if (slot === -1) { for (let i = 0; i < 16; i++) { if (!newSeats[i]) { slot = i; break; } } }
             } else {
-              for (let i = 0; i < 12; i++) { if (!newSeats[i]) { slot = i; break; } }
+              for (let i = 0; i < 16; i++) { if (!newSeats[i]) { slot = i; break; } }
             }
             if (slot === -1) break;
             newSeats[slot] = { name: p.name, title: p.title, instructions: p.instructions, temperature: DEFAULT_TEMP, imageUrl: p.imageUrl || null, profileUrl: p.profileUrl || null, side: p.side || null };
@@ -1413,7 +1417,7 @@ Return the array starting with [ and ending with ]. Nothing else.`;
                     <button onClick={() => setShowSuggestions(false)} className="px-5 py-2.5 rounded-xl bg-slate-700/60 hover:bg-slate-700 transition-all text-sm">Cancel</button>
                     <button onClick={addSelectedPersonas} disabled={selectedSuggestions.size === 0}
                       className="flex-1 py-2.5 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 disabled:opacity-30 transition-all font-semibold text-sm">
-                      {selectedSuggestions.size === 0 ? "Select personas to add" : "Add " + Math.min(selectedSuggestions.size, 12) + " Personas & Start Debate" + (selectedSuggestions.size > 12 ? " (capped at 12)" : "")}
+                      {selectedSuggestions.size === 0 ? "Select personas to add" : "Add " + Math.min(selectedSuggestions.size, 16) + " Personas & Start Debate" + (selectedSuggestions.size > 16 ? " (capped at 16)" : "")}
                     </button>
                   </div>
                 </div>
@@ -1440,7 +1444,7 @@ Return the array starting with [ and ending with ]. Nothing else.`;
           const prefix = skipped > 0 ? "[" + skipped + " earlier messages omitted for brevity]\n\n" : "";
           // Find moderator message within last 12 messages so all speakers in this round see it
           let moderatorNote = "";
-          const lookback = recent.slice(-12);
+          const lookback = recent.slice(-18);
           for (let j = lookback.length - 1; j >= 0; j--) {
             if (lookback[j].isUser) {
               moderatorNote = "\n\nIMPORTANT — The moderator said: \"" + lookback[j].text + "\"\nYou MUST address the moderator's question or comment in your response.";
@@ -1473,7 +1477,7 @@ Return the array starting with [ and ending with ]. Nothing else.`;
         // Helper: get effective side for a seat (explicit override > index default)
         const getSeatSide = (seat, idx) => {
           if (seat && seat.side) return seat.side;
-          return debateFormat === "sides" ? (idx < 6 ? "for" : "against") : "neutral";
+          return debateFormat === "sides" ? (idx < 8 ? "for" : "against") : "neutral";
         };
 
         // Cycle a seat's side override on click
@@ -1808,7 +1812,7 @@ Table: | # | Argument | Strength Assessment |
             <div className="flex-1 flex items-center justify-center p-3 overflow-hidden">
               <div className="w-full max-w-6xl h-full flex gap-3 items-stretch">
                 <div className="flex flex-col gap-3 justify-around w-44 flex-shrink-0">
-                  {[0,1,2,3,4,5].map(i => {
+                  {[0,1,2,3,4,5,6,7].map(i => {
                     const seat = seats[i];
                     const c = COLORS[i];
                     const active = loadingSeat === i;
@@ -1915,7 +1919,7 @@ Table: | # | Argument | Strength Assessment |
                   </div>
                 </div>
                 <div className="flex flex-col gap-3 justify-around w-44 flex-shrink-0">
-                  {[6,7,8,9,10,11].map(i => {
+                  {[8,9,10,11,12,13,14,15].map(i => {
                     const seat = seats[i];
                     const c = COLORS[i];
                     const active = loadingSeat === i;
