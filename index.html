@@ -159,6 +159,18 @@
       return data.choices[0].message.content;
     }
 
+    async function fetchWikiImage(profileUrl) {
+      if (!profileUrl || !profileUrl.includes("wikipedia.org/wiki/")) return null;
+      try {
+        const title = decodeURIComponent(profileUrl.split("/wiki/")[1].split("#")[0].split("?")[0]);
+        const apiUrl = "https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(title);
+        const res = await fetch(apiUrl);
+        if (!res.ok) return null;
+        const data = await res.json();
+        return data.thumbnail?.source || data.originalimage?.source || null;
+      } catch (_) { return null; }
+    }
+
     async function callAPI(apiKey, baseUrl, model, system, msgs, maxTokens, temperature) {
       const apiUrl = getEndpoint(baseUrl, model, apiKey);
       const payload = buildPayload(baseUrl, model, system, msgs, maxTokens, temperature);
@@ -424,6 +436,15 @@
         if (s.debateStats) setDebateStats(s.debateStats);
         if (s.finished && s.debateSummary) setDebateFinished(true); // re-open summary modal
         undoStack.current = []; setCanUndo(false);
+        // Fetch missing Wikipedia images in background
+        const loadedSeats = s.seats || [];
+        loadedSeats.forEach((seat, idx) => {
+          if (seat && seat.profileUrl && !seat.imageUrl) {
+            fetchWikiImage(seat.profileUrl).then(url => {
+              if (url) setSeats(prev => { const u = [...prev]; if (u[idx]) u[idx] = { ...u[idx], imageUrl: url }; return u; });
+            });
+          }
+        });
       };
       const loadConversation = async (filename) => {
         try {
@@ -1176,6 +1197,14 @@ Return the array starting with [ and ending with ]. Nothing else.`;
           setSeats(newSeats);
           setShowSuggestions(false);
           setPage("debate");
+          // Fetch Wikipedia images in background for all seated personas
+          newSeats.forEach((s, idx) => {
+            if (s && s.profileUrl && !s.imageUrl) {
+              fetchWikiImage(s.profileUrl).then(url => {
+                if (url) setSeats(prev => { const u = [...prev]; if (u[idx]) u[idx] = { ...u[idx], imageUrl: url }; return u; });
+              });
+            }
+          });
         };
 
         return (
@@ -1717,11 +1746,11 @@ Table: | # | Argument | Strength Assessment |
                     const c = COLORS[i];
                     const active = loadingSeat === i;
                     return (
-                      <div key={i} onClick={() => openEdit(i)}
+                      <div key={i} onClick={() => !seat && openEdit(i)}
                         style={{ borderColor: seat ? (active ? c.ring : "transparent") : undefined, background: seat ? "linear-gradient(135deg, #1e293b, #0f172a)" : undefined }}
-                        className={"cursor-pointer rounded-2xl p-3 transition-all duration-300 border-2 relative group " + (seat ? "hover:scale-[1.02] shadow-lg" : "border-dashed border-slate-600 bg-slate-800/30 hover:bg-slate-800/50") + (active ? " scale-[1.03] shadow-xl" : "")}>
+                        className={"rounded-2xl p-3 transition-all duration-300 border-2 relative group " + (seat ? "hover:scale-[1.02] shadow-lg" : "cursor-pointer border-dashed border-slate-600 bg-slate-800/30 hover:bg-slate-800/50") + (active ? " scale-[1.03] shadow-xl" : "")}>
                         {seat && !active && (
-                          <div className="absolute top-1 right-1 flex flex-col opacity-0 group-hover:opacity-100 transition-opacity z-10" onClick={e => e.stopPropagation()}>
+                          <div className="absolute top-1 right-1 flex flex-col opacity-0 group-hover:opacity-100 transition-opacity z-10">
                             {i > 0 && seats[i-1] && <button onClick={() => swapSeats(i, i - 1)} className="p-0.5 rounded hover:bg-slate-600/80 text-slate-400 hover:text-white text-[10px] leading-none" title="Move up">▲</button>}
                             {i < 5 && seats[i+1] && <button onClick={() => swapSeats(i, i + 1)} className="p-0.5 rounded hover:bg-slate-600/80 text-slate-400 hover:text-white text-[10px] leading-none" title="Move down">▼</button>}
                           </div>
@@ -1740,15 +1769,13 @@ Table: | # | Argument | Strength Assessment |
                               })()}
                             </div>
                             <div className="flex items-center gap-2.5">
-                              <div className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 shadow-md border border-slate-600/30" style={{ backgroundColor: c.initBg }}>
+                              <a href={seat.profileUrl || undefined} target="_blank" rel="noreferrer" onClick={e => { if (!seat.profileUrl) { e.preventDefault(); openEdit(i); } }}
+                                className={"w-9 h-9 rounded-full overflow-hidden flex-shrink-0 shadow-md border-2 transition-colors " + (seat.profileUrl ? "border-blue-500/40 hover:border-blue-400 cursor-pointer" : "border-slate-600/30 cursor-pointer")} style={{ backgroundColor: c.initBg }} title={seat.profileUrl ? "Open Wikipedia" : "Edit persona"}>
                                 {seat.imageUrl ? <img src={seat.imageUrl} alt={seat.name} className="w-full h-full object-cover" onError={e => { e.target.style.display="none"; }} /> : null}
                                 {!seat.imageUrl && <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold">{seat.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}</div>}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="text-sm font-semibold text-slate-100 truncate flex items-center gap-1">
-                                  {seat.name}
-                                  {seat.profileUrl && <a href={seat.profileUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-blue-400 hover:text-blue-300 flex-shrink-0 text-[10px]" title="Wikipedia">↗</a>}
-                                </div>
+                              </a>
+                              <div className="min-w-0 flex-1 cursor-pointer hover:opacity-80" onClick={() => openEdit(i)} title="Edit persona">
+                                <div className="text-sm font-semibold text-slate-100 truncate">{seat.name}</div>
                                 <div className="text-[11px] text-slate-400 truncate">{seat.title}</div>
                               </div>
                             </div>
@@ -1824,9 +1851,15 @@ Table: | # | Argument | Strength Assessment |
                     const c = COLORS[i];
                     const active = loadingSeat === i;
                     return (
-                      <div key={i} onClick={() => openEdit(i)}
+                      <div key={i} onClick={() => !seat && openEdit(i)}
                         style={{ borderColor: seat ? (active ? c.ring : "transparent") : undefined, background: seat ? "linear-gradient(135deg, #1e293b, #0f172a)" : undefined }}
-                        className={"cursor-pointer rounded-2xl p-3 transition-all duration-300 border-2 relative " + (seat ? "hover:scale-[1.02] shadow-lg" : "border-dashed border-slate-600 bg-slate-800/30 hover:bg-slate-800/50") + (active ? " scale-[1.03] shadow-xl" : "")}>
+                        className={"rounded-2xl p-3 transition-all duration-300 border-2 relative group " + (seat ? "hover:scale-[1.02] shadow-lg" : "cursor-pointer border-dashed border-slate-600 bg-slate-800/30 hover:bg-slate-800/50") + (active ? " scale-[1.03] shadow-xl" : "")}>
+                        {seat && !active && (
+                          <div className="absolute top-1 right-1 flex flex-col opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                            {i > 6 && seats[i-1] && <button onClick={() => swapSeats(i, i - 1)} className="p-0.5 rounded hover:bg-slate-600/80 text-slate-400 hover:text-white text-[10px] leading-none" title="Move up">▲</button>}
+                            {i < 11 && seats[i+1] && <button onClick={() => swapSeats(i, i + 1)} className="p-0.5 rounded hover:bg-slate-600/80 text-slate-400 hover:text-white text-[10px] leading-none" title="Move down">▼</button>}
+                          </div>
+                        )}
                         {seat ? (
                           <div className="space-y-2">
                             <div className="flex items-center gap-2 mb-1">
@@ -1841,15 +1874,13 @@ Table: | # | Argument | Strength Assessment |
                               })()}
                             </div>
                             <div className="flex items-center gap-2.5">
-                              <div className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 shadow-md border border-slate-600/30" style={{ backgroundColor: c.initBg }}>
+                              <a href={seat.profileUrl || undefined} target="_blank" rel="noreferrer" onClick={e => { if (!seat.profileUrl) { e.preventDefault(); openEdit(i); } }}
+                                className={"w-9 h-9 rounded-full overflow-hidden flex-shrink-0 shadow-md border-2 transition-colors " + (seat.profileUrl ? "border-blue-500/40 hover:border-blue-400 cursor-pointer" : "border-slate-600/30 cursor-pointer")} style={{ backgroundColor: c.initBg }} title={seat.profileUrl ? "Open Wikipedia" : "Edit persona"}>
                                 {seat.imageUrl ? <img src={seat.imageUrl} alt={seat.name} className="w-full h-full object-cover" onError={e => { e.target.style.display="none"; }} /> : null}
                                 {!seat.imageUrl && <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold">{seat.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}</div>}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="text-sm font-semibold text-slate-100 truncate flex items-center gap-1">
-                                  {seat.name}
-                                  {seat.profileUrl && <a href={seat.profileUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-blue-400 hover:text-blue-300 flex-shrink-0 text-[10px]" title="Wikipedia">↗</a>}
-                                </div>
+                              </a>
+                              <div className="min-w-0 flex-1 cursor-pointer hover:opacity-80" onClick={() => openEdit(i)} title="Edit persona">
+                                <div className="text-sm font-semibold text-slate-100 truncate">{seat.name}</div>
                                 <div className="text-[11px] text-slate-400 truncate">{seat.title}</div>
                               </div>
                             </div>
@@ -2045,11 +2076,11 @@ Table: | # | Argument | Strength Assessment |
         const seat = seats[idx]; const c = COLORS[idx]; const active = loadingSeat === idx;
         const pickerOpen = speakPicker === idx;
         return (
-          <div onClick={() => openEdit(idx)}
+          <div onClick={() => !seat && openEdit(idx)}
             style={{ borderColor: seat ? (active ? c.ring : "transparent") : undefined, background: seat ? "linear-gradient(135deg, #1e293b, #0f172a)" : undefined }}
-            className={"cursor-pointer rounded-2xl p-3 transition-all duration-300 border-2 relative group " + (seat ? "hover:scale-[1.02] shadow-lg" : "border-dashed border-slate-600 bg-slate-800/30 hover:bg-slate-800/50") + (active ? " scale-[1.03] shadow-xl" : "")}>
+            className={"rounded-2xl p-3 transition-all duration-300 border-2 relative group " + (seat ? "hover:scale-[1.02] shadow-lg" : "cursor-pointer border-dashed border-slate-600 bg-slate-800/30 hover:bg-slate-800/50") + (active ? " scale-[1.03] shadow-xl" : "")}>
             {seat && !active && (
-              <div className="absolute top-1 right-1 flex flex-col opacity-0 group-hover:opacity-100 transition-opacity z-10" onClick={e => e.stopPropagation()}>
+              <div className="absolute top-1 right-1 flex flex-col opacity-0 group-hover:opacity-100 transition-opacity z-10">
                 {idx > 0 && seats[idx-1] && <button onClick={() => swapSeats(idx, idx - 1)} className="p-0.5 rounded hover:bg-slate-600/80 text-slate-400 hover:text-white text-[10px] leading-none" title="Move up">▲</button>}
                 {idx < seats.length - 1 && seats[idx+1] && <button onClick={() => swapSeats(idx, idx + 1)} className="p-0.5 rounded hover:bg-slate-600/80 text-slate-400 hover:text-white text-[10px] leading-none" title="Move down">▼</button>}
               </div>
@@ -2057,15 +2088,13 @@ Table: | # | Argument | Strength Assessment |
             {seat ? (
               <div className="space-y-2">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 shadow-md border border-slate-600/30" style={{ backgroundColor: c.initBg }}>
+                  <a href={seat.profileUrl || undefined} target="_blank" rel="noreferrer" onClick={e => { if (!seat.profileUrl) { e.preventDefault(); openEdit(idx); } }}
+                    className={"w-9 h-9 rounded-full overflow-hidden flex-shrink-0 shadow-md border-2 transition-colors " + (seat.profileUrl ? "border-blue-500/40 hover:border-blue-400 cursor-pointer" : "border-slate-600/30 cursor-pointer")} style={{ backgroundColor: c.initBg }} title={seat.profileUrl ? "Open Wikipedia" : "Edit persona"}>
                     {seat.imageUrl ? <img src={seat.imageUrl} alt={seat.name} className="w-full h-full object-cover" onError={e => { e.target.style.display="none"; }} /> : null}
                     {!seat.imageUrl && <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold">{seat.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}</div>}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-slate-100 truncate flex items-center gap-1">
-                      {seat.name}
-                      {seat.profileUrl && <a href={seat.profileUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-blue-400 hover:text-blue-300 flex-shrink-0 text-[10px]" title="Wikipedia">↗</a>}
-                    </div>
+                  </a>
+                  <div className="min-w-0 flex-1 cursor-pointer hover:opacity-80" onClick={() => openEdit(idx)} title="Edit persona">
+                    <div className="text-sm font-semibold text-slate-100 truncate">{seat.name}</div>
                     <div className="text-[11px] text-slate-400 truncate">{seat.title}</div>
                   </div>
                 </div>
