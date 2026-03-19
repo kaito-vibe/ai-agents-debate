@@ -674,6 +674,7 @@
         await savePersona({ name: editForm.name.trim(), title: editForm.title.trim(), instructions: editForm.instructions.trim(), temperature: editForm.temperature });
       };
       const removeSeat = (i) => { const u = [...seats]; u[i] = null; setSeats(u); setEditingSeat(null); };
+      const swapSeats = (a, b) => { if (a < 0 || b < 0 || a >= seats.length || b >= seats.length) return; const u = [...seats]; [u[a], u[b]] = [u[b], u[a]]; setSeats(u); };
       const openEdit = (i) => {
         if (loading) return;
         const s = seats[i];
@@ -1713,7 +1714,13 @@ Table: | # | Argument | Strength Assessment |
                     return (
                       <div key={i} onClick={() => openEdit(i)}
                         style={{ borderColor: seat ? (active ? c.ring : "transparent") : undefined, background: seat ? "linear-gradient(135deg, #1e293b, #0f172a)" : undefined }}
-                        className={"cursor-pointer rounded-2xl p-3 transition-all duration-300 border-2 relative " + (seat ? "hover:scale-[1.02] shadow-lg" : "border-dashed border-slate-600 bg-slate-800/30 hover:bg-slate-800/50") + (active ? " scale-[1.03] shadow-xl" : "")}>
+                        className={"cursor-pointer rounded-2xl p-3 transition-all duration-300 border-2 relative group " + (seat ? "hover:scale-[1.02] shadow-lg" : "border-dashed border-slate-600 bg-slate-800/30 hover:bg-slate-800/50") + (active ? " scale-[1.03] shadow-xl" : "")}>
+                        {seat && !active && (
+                          <div className="absolute top-1 right-1 flex flex-col opacity-0 group-hover:opacity-100 transition-opacity z-10" onClick={e => e.stopPropagation()}>
+                            {i > 0 && seats[i-1] && <button onClick={() => swapSeats(i, i - 1)} className="p-0.5 rounded hover:bg-slate-600/80 text-slate-400 hover:text-white text-[10px] leading-none" title="Move up">▲</button>}
+                            {i < 5 && seats[i+1] && <button onClick={() => swapSeats(i, i + 1)} className="p-0.5 rounded hover:bg-slate-600/80 text-slate-400 hover:text-white text-[10px] leading-none" title="Move down">▼</button>}
+                          </div>
+                        )}
                         {seat ? (
                           <div className="space-y-2">
                             <div className="flex items-center gap-2 mb-1">
@@ -2035,7 +2042,13 @@ Table: | # | Argument | Strength Assessment |
         return (
           <div onClick={() => openEdit(idx)}
             style={{ borderColor: seat ? (active ? c.ring : "transparent") : undefined, background: seat ? "linear-gradient(135deg, #1e293b, #0f172a)" : undefined }}
-            className={"cursor-pointer rounded-2xl p-3 transition-all duration-300 border-2 relative " + (seat ? "hover:scale-[1.02] shadow-lg" : "border-dashed border-slate-600 bg-slate-800/30 hover:bg-slate-800/50") + (active ? " scale-[1.03] shadow-xl" : "")}>
+            className={"cursor-pointer rounded-2xl p-3 transition-all duration-300 border-2 relative group " + (seat ? "hover:scale-[1.02] shadow-lg" : "border-dashed border-slate-600 bg-slate-800/30 hover:bg-slate-800/50") + (active ? " scale-[1.03] shadow-xl" : "")}>
+            {seat && !active && (
+              <div className="absolute top-1 right-1 flex flex-col opacity-0 group-hover:opacity-100 transition-opacity z-10" onClick={e => e.stopPropagation()}>
+                {idx > 0 && seats[idx-1] && <button onClick={() => swapSeats(idx, idx - 1)} className="p-0.5 rounded hover:bg-slate-600/80 text-slate-400 hover:text-white text-[10px] leading-none" title="Move up">▲</button>}
+                {idx < seats.length - 1 && seats[idx+1] && <button onClick={() => swapSeats(idx, idx + 1)} className="p-0.5 rounded hover:bg-slate-600/80 text-slate-400 hover:text-white text-[10px] leading-none" title="Move down">▼</button>}
+              </div>
+            )}
             {seat ? (
               <div className="space-y-2">
                 <div className="flex items-center gap-2.5">
